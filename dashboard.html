@@ -446,86 +446,102 @@ function logout() {
   window.location.href = 'login.html';
 }
 
-async function loadRealData() {
-  try {
-    const resp = await authFetch(`${API_BASE_URL}/api/analytics`);
-    if (!resp || !resp.ok) throw new Error('Ошибка сервера');
-    const data = await resp.json();
-    console.log('Данные с сервера:', data);
-    // TODO: заменить CAMPAIGNS на data.campaigns когда подключим FB/Google
-  } catch (err) {
-    console.error('Не удалось загрузить данные:', err);
-  }
-}
+// ── LIVE STATE ────────────────────────────────────────────────────
+let CLIENTS   = [];
+let CAMPAIGNS = [];
+let TIMESERIES = [];
+let LIVE_KPI  = null;
 
-// ── MOCK DATA ──────────────────────────────────────────────────────
-const CLIENTS = [
-  { id: 'ogee',     name: 'OGEE Beauty',    color: '#FF6584', emoji: '💄' },
-  { id: 'medtour',  name: 'MedTour KZ',     color: '#4ade80', emoji: '🏥' },
-  { id: 'astana',   name: 'Astana Motors',  color: '#fbbf24', emoji: '🚗' },
-  { id: 'remax',    name: 'RE/MAX Elite',   color: '#60a5fa', emoji: '🏠' },
-  { id: 'fitclub',  name: 'FitClub',        color: '#a78bfa', emoji: '💪' },
-];
-
-const CAMPAIGNS = [
-  { source:'facebook', name:'OGEE — Лиды | Алматы | Женщины 25-44', client:'ogee',    spend:3420, imp:182000, clicks:4100, leads:89, cpl:38.4, ctr:2.25, cpm:18.8, active:true },
-  { source:'facebook', name:'OGEE — Мессенджер | Ретаргет',          client:'ogee',    spend:890,  imp:41000,  clicks:1240, leads:31, cpl:28.7, ctr:3.02, cpm:21.7, active:true },
-  { source:'google',   name:'MedTour — Поиск | Лечение за рубежом',  client:'medtour', spend:2100, imp:38000,  clicks:1890, leads:54, cpl:38.9, ctr:4.97, cpm:55.3, active:true },
-  { source:'google',   name:'Astana Motors — Авто кредит',           client:'astana',  spend:1750, imp:55000,  clicks:2200, leads:38, cpl:46.1, ctr:4.00, cpm:31.8, active:true },
-  { source:'tiktok',   name:'OGEE — Видео | Beauty routine',          client:'ogee',    spend:680,  imp:210000, clicks:3800, leads:22, cpl:30.9, ctr:1.81, cpm:3.24,  active:true },
-  { source:'facebook', name:'RE/MAX — Лиды | Квартиры Алматы',       client:'remax',   spend:1540, imp:78000,  clicks:1960, leads:42, cpl:36.7, ctr:2.51, cpm:19.7, active:true },
-  { source:'facebook', name:'FitClub — Абонемент | Лето 2025',       client:'fitclub', spend:430,  imp:33000,  clicks:820,  leads:18, cpl:23.9, ctr:2.48, cpm:13.0, active:false },
-  { source:'google',   name:'MedTour — Дисплей | Ретаргет',          client:'medtour', spend:560,  imp:95000,  clicks:680,  leads:9,  cpl:62.2, ctr:0.72, cpm:5.89,  active:true },
-  { source:'tiktok',   name:'Astana Motors — TopView тест-драйв',    client:'astana',  spend:950,  imp:340000, clicks:5600, leads:28, cpl:33.9, ctr:1.65, cpm:2.79,  active:true },
-  { source:'amocrm',   name:'RE/MAX — Воронка: квартиры',            client:'remax',   spend:0,    imp:0,      clicks:0,    leads:67, cpl:0,    ctr:0,    cpm:0,     active:true },
-];
-
-const DAYS = ['28 апр','29 апр','30 апр','1 май','2 май','3 май','4 май'];
-const SPEND_FB = [1820, 2140, 1950, 2480, 2890, 2320, 1980];
-const SPEND_GG = [980,  1100, 1240, 1380, 1490, 1210, 1040];
-const SPEND_TT = [320,  440,  390,  520,  610,  480,  380];
-const CPL_DATA = [42.1, 39.8, 40.5, 37.2, 35.8, 36.4, 37.0];
-const CTR_FB   = [2.41, 2.18, 2.35, 2.52, 2.29, 2.48, 2.25];
-const CTR_GG   = [4.81, 4.95, 5.12, 4.78, 5.03, 4.87, 4.97];
-const CTR_TT   = [1.72, 1.85, 1.68, 1.91, 1.77, 1.82, 1.81];
-
-const ALERTS_DATA = [
-  { icon:'⚠️', name:'OGEE Beauty — CPL вырос на 58%', desc:'Вчера: $61.2 vs среднее $38.4. Проверьте аудитории.', time:'Сегодня, 09:32' },
-  { icon:'📉', name:'FitClub — Падение CTR на 34%', desc:'CTR вчера 1.62% vs среднее 2.45%. Выгорание.', time:'Сегодня, 09:35' },
-  { icon:'⛔', name:'FitClub — Кампания остановлена', desc:'Facebook Ads: $0 вчера при $430 позавчера.', time:'Сегодня, 09:36' },
-];
-
-// ── STATE ─────────────────────────────────────────────────────────
 let activeSource = 'all';
 let activeClient = 'all';
 let sortField = 'spend';
 let sortDir = -1;
 let spendChart, cplChart, ctrChart;
 
+const COLORS = ['#FF6584','#4ade80','#fbbf24','#60a5fa','#a78bfa','#f97316','#22d3ee'];
+const EMOJIS = ['🏢','🏥','🚗','🏠','💪','💄','🎯'];
+
 // ── INIT ──────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  // Set default dates
+document.addEventListener('DOMContentLoaded', async () => {
   const today = new Date();
   const from  = new Date(); from.setDate(today.getDate() - 7);
   document.getElementById('dateFrom').value = from.toISOString().slice(0,10);
   document.getElementById('dateTo').value   = today.toISOString().slice(0,10);
 
-  // Build client list in sidebar
-  const clientList = document.getElementById('clientList');
-  CLIENTS.forEach(c => {
-    const el = document.createElement('div');
-    el.className = 'client-item';
-    el.innerHTML = `<div class="client-avatar" style="background:${c.color}22;color:${c.color}">${c.emoji}</div>${c.name}`;
-    el.onclick = () => selectClient(c.id, el);
-    clientList.appendChild(el);
-    // also add to select
-    const opt = document.createElement('option');
-    opt.value = c.id; opt.textContent = c.name;
-    document.getElementById('clientSelect').appendChild(opt);
-  });
-
-  renderAll();
+  await loadClients();
+  await loadRealData();
 });
+
+async function loadClients() {
+  try {
+    const resp = await authFetch(`${API_BASE_URL}/api/clients`);
+    if (!resp || !resp.ok) return;
+    const data = await resp.json();
+    CLIENTS = data.map((c, i) => ({
+      id:    c.id,
+      name:  c.name,
+      color: COLORS[i % COLORS.length],
+      emoji: EMOJIS[i % EMOJIS.length],
+    }));
+
+    const clientList = document.getElementById('clientList');
+    clientList.innerHTML = '';
+    const sel = document.getElementById('clientSelect');
+    // clear old options except first
+    while (sel.options.length > 1) sel.remove(1);
+
+    CLIENTS.forEach(c => {
+      const el = document.createElement('div');
+      el.className = 'client-item';
+      el.innerHTML = `<div class="client-avatar" style="background:${c.color}22;color:${c.color}">${c.emoji}</div>${c.name}`;
+      el.onclick = () => selectClient(c.id, el);
+      clientList.appendChild(el);
+      const opt = document.createElement('option');
+      opt.value = c.id; opt.textContent = c.name;
+      sel.appendChild(opt);
+    });
+  } catch(e) {
+    console.error('loadClients error:', e);
+  }
+}
+
+async function loadRealData() {
+  try {
+    const from = document.getElementById('dateFrom').value;
+    const to   = document.getElementById('dateTo').value;
+    const clientParam = activeClient !== 'all' ? `&client_id=${activeClient}` : '';
+    const sourceParam = activeSource !== 'all' ? `&source=${activeSource}` : '';
+
+    const resp = await authFetch(
+      `${API_BASE_URL}/api/analytics?from=${from}&to=${to}${clientParam}${sourceParam}`
+    );
+    if (!resp || !resp.ok) return;
+    const data = await resp.json();
+
+    // Конвертируем campaigns в формат дашборда
+    CAMPAIGNS = (data.campaigns || []).map(c => ({
+      source:    c.source,
+      name:      c.campaign_name,
+      client:    activeClient,
+      spend:     parseFloat(c.spend) || 0,
+      imp:       parseInt(c.impressions) || 0,
+      clicks:    parseInt(c.clicks) || 0,
+      leads:     parseInt(c.leads) || 0,
+      cpl:       parseFloat(c.cpl) || 0,
+      ctr:       parseFloat(c.avg_ctr) || 0,
+      cpm:       parseFloat(c.avg_cpm) || 0,
+      active:    true,
+    }));
+
+    TIMESERIES = data.timeseries || [];
+    LIVE_KPI   = data.kpi;
+
+    renderAll();
+  } catch(e) {
+    console.error('loadRealData error:', e);
+    renderAll(); // показываем что есть
+  }
+}
 
 function renderAll() {
   renderKPI();
@@ -552,25 +568,36 @@ function getFilteredCamps() {
 }
 
 function renderKPI() {
-  const camps = getFilteredCamps();
-  const totals = {
-    spend: camps.reduce((s,c) => s + c.spend, 0),
-    leads: camps.reduce((s,c) => s + c.leads, 0),
-    cpl:   0, ctr: 0, cpm: 0,
-  };
-  const withLeads = camps.filter(c => c.leads > 0);
-  const withCtr   = camps.filter(c => c.ctr > 0);
-  totals.cpl = withLeads.length ? totals.spend / totals.leads : 0;
-  totals.ctr = withCtr.length   ? withCtr.reduce((s,c) => s+c.ctr, 0) / withCtr.length : 0;
-  const withCpm = camps.filter(c => c.cpm > 0);
-  totals.cpm = withCpm.length   ? withCpm.reduce((s,c) => s+c.cpm, 0) / withCpm.length : 0;
+  // Используем LIVE_KPI если есть, иначе считаем из CAMPAIGNS
+  let totals;
+  if (LIVE_KPI && LIVE_KPI.total_spend !== null) {
+    totals = {
+      spend: parseFloat(LIVE_KPI.total_spend) || 0,
+      leads: parseInt(LIVE_KPI.total_leads)   || 0,
+      cpl:   parseFloat(LIVE_KPI.avg_cpl)     || 0,
+      ctr:   parseFloat(LIVE_KPI.avg_ctr)     || 0,
+      cpm:   parseFloat(LIVE_KPI.avg_cpm)     || 0,
+    };
+  } else {
+    const camps = CAMPAIGNS;
+    totals = {
+      spend: camps.reduce((s,c) => s + c.spend, 0),
+      leads: camps.reduce((s,c) => s + c.leads, 0),
+      cpl: 0, ctr: 0, cpm: 0,
+    };
+    const withLeads = camps.filter(c => c.leads > 0);
+    totals.cpl = withLeads.length ? totals.spend / totals.leads : 0;
+    const withCtr = camps.filter(c => c.ctr > 0);
+    totals.ctr = withCtr.length ? withCtr.reduce((s,c) => s+c.ctr,0)/withCtr.length : 0;
+    const withCpm = camps.filter(c => c.cpm > 0);
+    totals.cpm = withCpm.length ? withCpm.reduce((s,c) => s+c.cpm,0)/withCpm.length : 0;
+  }
 
   const grid = document.getElementById('kpiGrid');
   grid.innerHTML = KPI_DEFS.map(k => `
     <div class="kpi-card" style="--kpi-color:${k.color}">
       <div class="kpi-label">${k.label}</div>
       <div class="kpi-val">${k.fmt(totals[k.key])}</div>
-      <div class="kpi-delta ${k.deltaUp ? 'up' : 'down'}">${k.deltaKey} vs прошлая неделя</div>
       <div class="kpi-sub">${k.sub}</div>
     </div>
   `).join('');
@@ -592,59 +619,145 @@ function renderCharts() {
   if (cplChart)   cplChart.destroy();
   if (ctrChart)   ctrChart.destroy();
 
-  // Spend chart
+  // --- Build data structures from TIMESERIES ---
+  const dateSet = new Set();
+  TIMESERIES.forEach(r => dateSet.add(r.date.slice(0, 10)));
+  const DAYS_RAW = Array.from(dateSet).sort();
+
+  const SRC_CFG = {
+    facebook: { label: 'Facebook', spendColor: 'rgba(108,99,255,0.75)', ctrColor: '#6C63FF', ctrBg: 'rgba(108,99,255,0.06)', ctrLabel: 'FB' },
+    google:   { label: 'Google',   spendColor: 'rgba(234,67,53,0.75)',  ctrColor: '#EA4335', ctrBg: 'rgba(234,67,53,0.06)',  ctrLabel: 'GG' },
+    tiktok:   { label: 'TikTok',   spendColor: 'rgba(136,136,136,0.6)', ctrColor: '#888',    ctrBg: 'rgba(136,136,136,0.05)',ctrLabel: 'TT' },
+  };
+
+  // bySourceDate[source][date] = { spend, leads, ctrSum, ctrCount }
+  const bySD = {};
+  TIMESERIES.forEach(r => {
+    const d = r.date.slice(0, 10);
+    if (!bySD[r.source]) bySD[r.source] = {};
+    if (!bySD[r.source][d]) bySD[r.source][d] = { spend: 0, leads: 0, ctrSum: 0, ctrCount: 0 };
+    bySD[r.source][d].spend    += parseFloat(r.spend)   || 0;
+    bySD[r.source][d].leads    += parseInt(r.leads)      || 0;
+    bySD[r.source][d].ctrSum   += parseFloat(r.avg_ctr) || 0;
+    bySD[r.source][d].ctrCount += 1;
+  });
+
+  const dayLabels = DAYS_RAW.map(d => {
+    const dt = new Date(d + 'T00:00:00');
+    return dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  });
+
+  // Stacked spend datasets (only sources present in data)
+  const spendDatasets = Object.keys(SRC_CFG)
+    .filter(src => bySD[src])
+    .map(src => ({
+      label: SRC_CFG[src].label,
+      data: DAYS_RAW.map(d => bySD[src][d] ? +bySD[src][d].spend.toFixed(2) : 0),
+      backgroundColor: SRC_CFG[src].spendColor,
+      borderRadius: 4,
+      stack: 's',
+    }));
+
+  // CPL per day (all sources combined)
+  const CPL_DATA = DAYS_RAW.map(d => {
+    let spend = 0, leads = 0;
+    Object.values(bySD).forEach(srcMap => {
+      if (srcMap[d]) { spend += srcMap[d].spend; leads += srcMap[d].leads; }
+    });
+    return leads > 0 ? +(spend / leads).toFixed(2) : null;
+  });
+
+  // CTR line datasets
+  const ctrDatasets = Object.keys(SRC_CFG)
+    .filter(src => bySD[src])
+    .map(src => ({
+      label: SRC_CFG[src].ctrLabel,
+      data: DAYS_RAW.map(d => {
+        const row = bySD[src][d];
+        return row && row.ctrCount > 0 ? +(row.ctrSum / row.ctrCount).toFixed(3) : null;
+      }),
+      borderColor: SRC_CFG[src].ctrColor,
+      backgroundColor: SRC_CFG[src].ctrBg,
+      tension: 0.4, fill: true, borderWidth: 2, pointRadius: 3, spanGaps: true,
+    }));
+
+  const noData = DAYS_RAW.length === 0;
+  const emptyLabels = noData ? ['—'] : dayLabels;
+
+  // Spend chart (stacked bar)
   spendChart = new Chart(document.getElementById('spendChart'), {
     type: 'bar',
     data: {
-      labels: DAYS,
-      datasets: [
-        { label:'Facebook', data: SPEND_FB, backgroundColor:'rgba(108,99,255,0.7)', borderRadius:4, stack:'s' },
-        { label:'Google',   data: SPEND_GG, backgroundColor:'rgba(234,67,53,0.7)',  borderRadius:4, stack:'s' },
-        { label:'TikTok',   data: SPEND_TT, backgroundColor:'rgba(136,136,136,0.6)',borderRadius:4, stack:'s' },
-      ]
+      labels: emptyLabels,
+      datasets: spendDatasets.length ? spendDatasets : [
+        { label: 'Нет данных', data: [0], backgroundColor: 'transparent', stack: 's' }
+      ],
     },
     options: { ...chartDefaults, plugins: { legend: { display: false } } },
   });
 
-  // CPL chart
+  // CPL chart (line)
   cplChart = new Chart(document.getElementById('cplChart'), {
     type: 'line',
     data: {
-      labels: DAYS,
+      labels: emptyLabels,
       datasets: [{
-        data: CPL_DATA,
+        data: noData ? [0] : CPL_DATA,
         borderColor: '#fbbf24',
         backgroundColor: 'rgba(251,191,36,0.08)',
-        tension: 0.4, fill: true, borderWidth: 2, pointRadius: 4, pointBackgroundColor:'#fbbf24',
-      }]
+        tension: 0.4, fill: true, borderWidth: 2,
+        pointRadius: 4, pointBackgroundColor: '#fbbf24', spanGaps: true,
+      }],
     },
     options: { ...chartDefaults },
   });
 
-  // CTR chart
+  // CTR chart (multi-line)
   ctrChart = new Chart(document.getElementById('ctrChart'), {
     type: 'line',
     data: {
-      labels: DAYS,
-      datasets: [
-        { label:'FB', data:CTR_FB, borderColor:'#6C63FF', backgroundColor:'rgba(108,99,255,0.06)', tension:0.4, fill:true, borderWidth:2, pointRadius:3 },
-        { label:'GG', data:CTR_GG, borderColor:'#EA4335', backgroundColor:'rgba(234,67,53,0.06)',  tension:0.4, fill:true, borderWidth:2, pointRadius:3 },
-        { label:'TT', data:CTR_TT, borderColor:'#888',    backgroundColor:'rgba(136,136,136,0.05)',tension:0.4, fill:true, borderWidth:2, pointRadius:3 },
-      ]
+      labels: emptyLabels,
+      datasets: ctrDatasets.length ? ctrDatasets : [
+        { label: 'Нет данных', data: [null], borderColor: 'transparent' }
+      ],
     },
-    options: { ...chartDefaults, plugins: { legend: { display: true, labels: { color:'#64748B', boxWidth:10, font:{size:11} } } } },
+    options: {
+      ...chartDefaults,
+      plugins: { legend: { display: true, labels: { color: '#64748B', boxWidth: 10, font: { size: 11 } } } },
+    },
   });
 }
 
 // ── ALERTS ────────────────────────────────────────────────────────
+function buildAlerts() {
+  const alerts = [];
+  // Кампании с высоким CPL (> $50)
+  CAMPAIGNS.filter(c => c.cpl > 50).forEach(c => {
+    alerts.push({ icon: '⚠️', name: c.name, desc: `CPL $${c.cpl.toFixed(2)} — выше порога $50`, time: 'Сейчас' });
+  });
+  // Кампании с нулевыми лидами но расходом
+  CAMPAIGNS.filter(c => c.leads === 0 && c.spend > 0).forEach(c => {
+    alerts.push({ icon: '🔴', name: c.name, desc: `Расход $${c.spend.toFixed(0)} — лиды не зафиксированы`, time: 'Сейчас' });
+  });
+  // Низкий CTR < 0.3%
+  CAMPAIGNS.filter(c => c.ctr > 0 && c.ctr < 0.3).forEach(c => {
+    alerts.push({ icon: '📉', name: c.name, desc: `CTR ${c.ctr.toFixed(2)}% — аудитория выгорает`, time: 'Сейчас' });
+  });
+  if (!alerts.length) {
+    alerts.push({ icon: '✅', name: 'Всё в норме', desc: 'Нет активных алертов', time: '' });
+  }
+  return alerts.slice(0, 5);
+}
+
 function renderAlerts() {
-  document.getElementById('alertsList').innerHTML = ALERTS_DATA.map(a => `
+  const alerts = buildAlerts();
+  document.getElementById('alertsList').innerHTML = alerts.map(a => `
     <div class="alert-item">
       <div class="alert-icon">${a.icon}</div>
       <div class="alert-body">
         <div class="alert-name">${a.name}</div>
         <div class="alert-desc">${a.desc}</div>
-        <div class="alert-time">${a.time}</div>
+        ${a.time ? `<div class="alert-time">${a.time}</div>` : ''}
       </div>
     </div>
   `).join('');
@@ -687,79 +800,4 @@ function sortTable() { sortField = document.getElementById('sortSelect').value; 
 // ── CONTROLS ──────────────────────────────────────────────────────
 function setSource(src, el) {
   activeSource = src;
-  document.querySelectorAll('.source-tab').forEach(t => t.classList.remove('active'));
-  el.classList.add('active');
-  renderKPI();
-  renderTable();
-}
-
-function selectClient(id, el) {
-  activeClient = id;
-  document.querySelectorAll('.client-item').forEach(i => i.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById('clientSelect').value = id;
-  applyFilters();
-}
-
-function applyFilters() {
-  activeClient = document.getElementById('clientSelect').value;
-  document.querySelectorAll('.client-item').forEach(i => i.classList.remove('active'));
-  if (activeClient !== 'all') {
-    const items = document.querySelectorAll('.client-item');
-    const idx = CLIENTS.findIndex(c => c.id === activeClient);
-    if (idx >= 0) items[idx].classList.add('active');
-  }
-  const name = activeClient === 'all' ? 'Все клиенты' : (CLIENTS.find(c => c.id === activeClient)?.name || '');
-  document.getElementById('topTitle').textContent = name ? `Аналитика — ${name}` : 'Аналитика';
-  renderKPI();
-  renderTable();
-}
-
-async function syncData() {
-  const btn  = document.getElementById('syncBtn');
-  const icon = document.getElementById('syncIcon');
-  btn.classList.add('loading');
-  btn.disabled = true;
-  try {
-    const resp = await authFetch(`${API_BASE_URL}/api/integrations/sync/manual`, { method: 'POST' });
-    if (resp && resp.ok) {
-      showToast('✅', 'Синхронизация запущена');
-      setTimeout(loadRealData, 3000);
-    } else {
-      showToast('❌', 'Ошибка синхронизации');
-    }
-  } catch (err) {
-    showToast('❌', 'Сервер недоступен');
-  } finally {
-    btn.classList.remove('loading');
-    btn.disabled = false;
-    document.getElementById('syncIcon').style.transform = '';
-  }
-}
-
-function setPage(page) {
-  const pages = {
-    clients: 'Управление клиентами',
-    reports: 'Отчёты',
-    alerts: 'Алерты и уведомления',
-    integrations: 'Интеграции',
-    dashboard: 'Аналитика',
-  };
-  document.getElementById('topTitle').textContent = pages[page] || 'Дашборд';
-  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-  event.currentTarget.classList.add('active');
-  if (page !== 'dashboard') {
-    showToast('🚧', `Раздел "${pages[page]}" — в разработке`);
-  }
-}
-
-function showToast(icon, msg) {
-  document.getElementById('toastIcon').textContent = icon;
-  document.getElementById('toastMsg').textContent = msg;
-  const t = document.getElementById('toast');
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3000);
-}
-</script>
-</body>
-</html>
+  document.querySelectorAll('.source-tab').forEach(t => t.classList.
