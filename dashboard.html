@@ -396,6 +396,27 @@
 </div>
 
 <script>
+// ── CONFIG ────────────────────────────────────────────────────────
+const API_BASE_URL = 'https://repoplus-production.up.railway.app';
+
+async function loadRealData() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/analytics`);
+        if (!response.ok) throw new Error('Ошибка сервера');
+        
+        const data = await response.json();
+        
+        // Когда бэкенд будет отдавать реальные данные, 
+        // мы заменим константы CAMPAIGNS на data.campaigns
+        console.log('Данные с сервера получены:', data);
+        
+        // renderAll(); // Перерисовываем всё с новыми данными
+    } catch (err) {
+        console.error('Не удалось загрузить данные:', err);
+        showToast('❌', 'Ошибка связи с сервером');
+    }
+}
+
 // ── MOCK DATA ──────────────────────────────────────────────────────
 const CLIENTS = [
   { id: 'ogee',     name: 'OGEE Beauty',    color: '#FF6584', emoji: '💄' },
@@ -653,23 +674,32 @@ function applyFilters() {
   renderTable();
 }
 
-function syncData() {
-  const btn = document.getElementById('syncBtn');
-  const icon = document.getElementById('syncIcon');
-  btn.classList.add('loading');
-  btn.disabled = true;
-  let angle = 0;
-  const spin = setInterval(() => {
-    icon.style.transform = `rotate(${angle}deg)`;
-    angle += 30;
-  }, 50);
-  setTimeout(() => {
-    clearInterval(spin);
-    icon.style.transform = '';
-    btn.classList.remove('loading');
-    btn.disabled = false;
-    showToast('✅', 'Данные синхронизированы успешно');
-  }, 2200);
+async function syncData() {
+    const btn = document.getElementById('syncBtn');
+    const icon = document.getElementById('syncIcon');
+    
+    btn.classList.add('loading');
+    btn.disabled = true;
+    
+    try {
+        // Делаем реальный запрос к бэкенду на запуск синхронизации
+        const response = await fetch(`${API_BASE_URL}/api/sync/manual`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (response.ok) {
+            showToast('✅', 'Данные успешно обновлены из Facebook/Google');
+            loadRealData(); // Обновляем цифры на экране
+        } else {
+            throw new Error('Ошибка синхронизации');
+        }
+    } catch (err) {
+        showToast('❌', 'Сервер временно недоступен');
+    } finally {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+    }
 }
 
 function setPage(page) {
