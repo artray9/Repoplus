@@ -800,4 +800,146 @@ function sortTable() { sortField = document.getElementById('sortSelect').value; 
 // ── CONTROLS ──────────────────────────────────────────────────────
 function setSource(src, el) {
   activeSource = src;
-  document.querySelectorAll('.source-tab').forEach(t => t.classList.
+  document.querySelectorAll('.source-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  loadRealData();
+}
+
+function selectClient(id, el) {
+  activeClient = id;
+  document.querySelectorAll('.client-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('clientSelect').value = id;
+  applyFilters();
+}
+
+function applyFilters() {
+  activeClient = document.getElementById('clientSelect').value;
+  document.querySelectorAll('.client-item').forEach(i => i.classList.remove('active'));
+  if (activeClient !== 'all') {
+    const items = document.querySelectorAll('.client-item');
+    const idx = CLIENTS.findIndex(c => c.id === activeClient);
+    if (idx >= 0) items[idx].classList.add('active');
+  }
+  const name = activeClient === 'all' ? 'Все клиенты' : (CLIENTS.find(c => c.id === activeClient)?.name || '');
+  document.getElementById('topTitle').textContent = name ? `Аналитика — ${name}` : 'Аналитика';
+  loadRealData();
+}
+
+async function syncData() {
+  const btn  = document.getElementById('syncBtn');
+  btn.classList.add('loading');
+  btn.disabled = true;
+  try {
+    const resp = await authFetch(`${API_BASE_URL}/api/integrations/sync/manual`, { method: 'POST' });
+    if (resp && resp.ok) {
+      showToast('✅', 'Синхронизация запущена');
+      setTimeout(loadRealData, 3000);
+    } else {
+      showToast('❌', 'Ошибка синхронизации');
+    }
+  } catch (err) {
+    showToast('❌', 'Сервер недоступен');
+  } finally {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+  }
+}
+
+function setPage(page) {
+  const pages = {
+    clients: 'Управление клиентами',
+    reports: 'Отчёты',
+    alerts: 'Алерты и уведомления',
+    integrations: 'Интеграции',
+    dashboard: 'Аналитика',
+  };
+  document.getElementById('topTitle').textContent = pages[page] || 'Дашборд';
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  if (page !== 'dashboard') {
+    showToast('🚧', `Раздел "${pages[page]}" — в разработке`);
+  }
+}
+
+function showToast(icon, msg) {
+  document.getElementById('toastIcon').textContent = icon;
+  document.getElementById('toastMsg').textContent = msg;
+  const t = document.getElementById('toast');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>remove('active'));
+  el.classList.add('active');
+  loadRealData();
+}
+
+function selectClient(id, el) {
+  activeClient = id;
+  document.querySelectorAll('.client-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('clientSelect').value = id;
+  applyFilters();
+}
+
+function applyFilters() {
+  activeClient = document.getElementById('clientSelect').value;
+  document.querySelectorAll('.client-item').forEach(i => i.classList.remove('active'));
+  if (activeClient !== 'all') {
+    const items = document.querySelectorAll('.client-item');
+    const idx = CLIENTS.findIndex(c => c.id === activeClient);
+    if (idx >= 0) items[idx].classList.add('active');
+  }
+  const name = activeClient === 'all' ? 'Все клиенты' : (CLIENTS.find(c => c.id === activeClient)?.name || '');
+  document.getElementById('topTitle').textContent = name ? `Аналитика — ${name}` : 'Аналитика';
+  loadRealData();
+}
+
+async function syncData() {
+  const btn = document.getElementById('syncBtn');
+  btn.classList.add('loading');
+  btn.disabled = true;
+  try {
+    const resp = await authFetch(`${API_BASE_URL}/api/integrations/sync/manual`, { method: 'POST' });
+    if (resp && resp.ok) {
+      showToast('✅', 'Синхронизация запущена');
+      setTimeout(loadRealData, 3000);
+    } else {
+      showToast('❌', 'Ошибка синхронизации');
+    }
+  } catch (err) {
+    showToast('❌', 'Сервер недоступен');
+  } finally {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+  }
+}
+
+function setPage(page) {
+  const pages = {
+    clients: 'Управление клиентами',
+    reports: 'Отчёты',
+    alerts: 'Алерты и уведомления',
+    integrations: 'Интеграции',
+    dashboard: 'Аналитика',
+  };
+  document.getElementById('topTitle').textContent = pages[page] || 'Дашборд';
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  if (page !== 'dashboard') {
+    showToast('🚧', `Раздел "${pages[page]}" — в разработке`);
+  }
+}
+
+function showToast(icon, msg) {
+  document.getElementById('toastIcon').textContent = icon;
+  document.getElementById('toastMsg').textContent = msg;
+  const t = document.getElementById('toast');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
