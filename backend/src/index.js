@@ -4,16 +4,22 @@ const cors    = require('cors');
 const cron    = require('node-cron');
 
 const authRoutes         = require('./routes/auth');
-// const clientsRoutes      = require('./routes/clients');
+const clientsRoutes      = require('./routes/clients');
 const analyticsRoutes    = require('./routes/analytics');
-// const integrationsRoutes = require('./routes/integrations');
+const integrationsRoutes = require('./routes/integrations');
 const { dailySync }      = require('./jobs/sync');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
 // ── MIDDLEWARE ───────────────────────────────────────────────────
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
+const corsOptions = {
+  // Разрешаем запросы с вашего домена и из переменной окружения
+  origin: [process.env.FRONTEND_URL, 'https://repoplus.kz', 'http://repoplus.kz'],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Request logger (dev)
@@ -24,9 +30,9 @@ app.use((req, _res, next) => {
 
 // ── ROUTES ───────────────────────────────────────────────────────
 app.use('/api/auth',         authRoutes);
-//app.use('/api/clients',      clientsRoutes);
+app.use('/api/clients',      clientsRoutes);
 app.use('/api/analytics',    analyticsRoutes);
-//app.use('/api/integrations', integrationsRoutes);
+app.use('/api/integrations', integrationsRoutes);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', ts: new Date() }));
 
