@@ -11,18 +11,35 @@ const { dailySync }      = require('./jobs/sync');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
+const HOST = '0.0.0.0'; // Railway требует явного биндинга на все интерфейсы
+
+// ── HEALTHCHECK — до всего, без авторизации и CORS ───────────────
+// Railway бьёт сюда сразу после деплоя, должен отвечать мгновенно
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', ts: new Date() });
+});
 
 // ── MIDDLEWARE ───────────────────────────────────────────────────
-const corsOptions = {
-  // Разрешаем запросы с вашего домена и из переменной окружения
-  origin: [process.env.FRONTEND_URL, 'https://repoplus.kz', 'http://repoplus.kz'],
+const allowedOrigins = [
+  'https://repoplus.kz',
+  'http://repoplus.kz',
+  'https://artray9.github.io',  // GitHub Pages
+  process.env.FRONTEND_URL,
+].filter(Boolean); // убираем undefined если FRONTEND_URL не задан
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Разрешаем запросы без origin (curl, Postman, Railway healthcheck)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: ${origin} не разрешён`));
+  },
   credentials: true,
-  optionsSuccessStatus: 200
-};
-app.use(cors(corsOptions));
+}));
+
 app.use(express.json());
 
-// Request logger (dev)
+// Request logger
 app.use((req, _res, next) => {
   console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
   next();
@@ -34,10 +51,7 @@ app.use('/api/clients',      clientsRoutes);
 app.use('/api/analytics',    analyticsRoutes);
 app.use('/api/integrations', integrationsRoutes);
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', ts: new Date() }));
-
-// ── CRON: ежедневная синхронизация в 06:00 UTC+5 ─────────────────
-// (01:00 UTC)
+// ── CRON: ежедневная синхронизация в 06:00 UTC+5 (01:00 UTC) ────
 cron.schedule('0 1 * * *', async () => {
   console.log('[CRON] Starting daily sync…');
   try { await dailySync(); }
@@ -45,6 +59,6 @@ cron.schedule('0 1 * * *', async () => {
 });
 
 // ── START ────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`🚀 Repoplus API running on port ${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`🚀 Repoplus API running on ${HOST}:${PORT}`);
 });

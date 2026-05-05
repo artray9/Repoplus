@@ -683,7 +683,7 @@ async function syncData() {
     
     try {
         // Делаем реальный запрос к бэкенду на запуск синхронизации
-        const response = await fetch(`${API_BASE_URL}/api/sync/manual`, {
+        const response = await fetch(`${API_BASE_URL}/api/integrations/sync/manual`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
