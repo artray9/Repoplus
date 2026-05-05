@@ -4,9 +4,9 @@ const cors    = require('cors');
 const cron    = require('node-cron');
 
 const authRoutes         = require('./routes/auth');
-const clientsRoutes      = require('./routes/clients');
+// const clientsRoutes      = require('./routes/clients');
 const analyticsRoutes    = require('./routes/analytics');
-const integrationsRoutes = require('./routes/integrations');
+// const integrationsRoutes = require('./routes/integrations');
 const { dailySync }      = require('./jobs/sync');
 
 const app  = express();
@@ -24,9 +24,9 @@ app.use((req, _res, next) => {
 
 // ── ROUTES ───────────────────────────────────────────────────────
 app.use('/api/auth',         authRoutes);
-app.use('/api/clients',      clientsRoutes);
+//app.use('/api/clients',      clientsRoutes);
 app.use('/api/analytics',    analyticsRoutes);
-app.use('/api/integrations', integrationsRoutes);
+//app.use('/api/integrations', integrationsRoutes);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', ts: new Date() }));
 
