@@ -1,0 +1,1570 @@
+/**
+ * ╔══════════════════════════════════════════════════════════════╗
+ * ║          ALLOY ANALYTICS DASHBOARD — v11.1 (Forecasts)       ║
+ * ║                                                              ║
+ * ║  Структура файла:                                            ║
+ * ║  1. CONFIG — все настройки                                   ║
+ * ║  2. FB_ACTIONS — словарь меток Facebook                      ║
+ * ║  3. МЕНЮ — onOpen                                            ║
+ * ║  4. SETTINGS — настройка объединённого листа                 ║
+ * ║  5. RUNNERS — mainRunner, dailySyncRunner                    ║
+ * ║  6. FACEBOOK — выгрузка данных                               ║
+ * ║  7. GOOGLE ADS — выгрузка данных                             ║
+ * ║  8. TIKTOK — выгрузка данных                                 ║
+ * ║  9. БИЛЛИНГ FB — billingRunner                               ║
+ * ║  10. БИЛЛИНГ TIKTOK — tiktokBillingRunner                    ║
+ * ║  11. БИЛЛИНГ GOOGLE — googleBillingRunner                    ║
+ * ║  12. TELEGRAM — рассылка лидов и биллинга                    ║
+ * ║  13. АУДИТ — инструменты диагностики меток                   ║
+ * ║  14. УТИЛИТЫ — вспомогательные функции                       ║
+ * ╚══════════════════════════════════════════════════════════════╝
+ */
+
+// ══════════════════════════════════════════════════════════════════
+// 1. CONFIG
+// ══════════════════════════════════════════════════════════════════
+var CONFIG = {
+  GOOGLE: {
+    CLIENT_ID:       function() { return PropertiesService.getScriptProperties().getProperty('GOOGLE_CLIENT_ID'); },
+    CLIENT_SECRET:   function() { return PropertiesService.getScriptProperties().getProperty('GOOGLE_CLIENT_SECRET'); },
+    REFRESH_TOKEN:   function() { return PropertiesService.getScriptProperties().getProperty('GOOGLE_REFRESH_TOKEN'); },
+    DEVELOPER_TOKEN: function() { return PropertiesService.getScriptProperties().getProperty('GOOGLE_DEVELOPER_TOKEN'); },
+    MCC_ID:          function() { return PropertiesService.getScriptProperties().getProperty('GOOGLE_MCC_ID'); },
+  },
+  FB: {
+    ACCESS_TOKEN: function() { return PropertiesService.getScriptProperties().getProperty('FB_ACCESS_TOKEN'); },
+    API_VERSION: 'v20.0',
+  },
+  TT: {
+    ACCESS_TOKEN:    function() { return PropertiesService.getScriptProperties().getProperty('TT_ACCESS_TOKEN'); },
+  },
+  TG: {
+    BOT_TOKEN: function() { return PropertiesService.getScriptProperties().getProperty('TG_BOT_TOKEN'); },
+  },
+  SHEETS: {
+    SETTINGS: 'Settings',
+    FACEBOOK: 'Выгрузка_FB',
+    GOOGLE:   'Выгрузка_Google',
+    TIKTOK:   'Выгрузка_TikTok',
+    LOG:      'Лог_ошибок',
+  },
+  COL: {
+    ACTIVE:       0,   // A
+    CLIENT:       1,   // B
+    REPORT_NAME:  2,   // C
+    FB_ID:        3,   // D
+    FB_STATUS:    4,   // E
+    GOOGLE_ID:    5,   // F
+    GOOGLE_STATUS:6,   // G
+    TIKTOK_ID:    7,   // H
+    TIKTOK_STATUS:8,   // I
+    FB_THRESHOLD: 9,   // J
+    FB_BILL_DATE: 10,  // K
+    GOOGLE_BAL:      11,  // L
+    GOOGLE_BAL_DATE: 12,  // M
+    TT_BAL:          13,  // N
+    TT_BAL_DATE:     14,  // O
+    TG_CHAT_ID:      15,  // P
+    TG_TOPIC_ID:     16,  // Q
+    CITIES:          17,  // R
+  },
+  TIMEZONE: 'GMT+5',
+};
+
+// ══════════════════════════════════════════════════════════════════
+// 2. FB ACTION TYPES
+// ══════════════════════════════════════════════════════════════════
+var FB_ACTIONS = {
+  MESSAGING: [
+    'onsite_conversion.messaging_conversation_started_7d',
+    'onsite_conversion.messaging_conversation_started',
+    'onsite_conversion.total_messaging_connection',
+  ],
+  LANDING_PAGE_VIEWS: ['landing_page_view'],
+  LEADS_GROUPED: ['onsite_conversion.lead_grouped'],
+  LEADS_RAW:     ['lead'],
+  IG_PROFILE_VISITS: ['instagram_profile_visit'],
+  LINK_CLICKS:       ['link_click'],
+  OUTBOUND_CLICKS:   ['outbound_click'],
+  WEBSITE_CONTACTS: [
+    'contact',
+    'onsite_conversion.contact',
+    'offsite_conversion.fb_pixel_custom.contact',
+    'offsite_conversion.fb_pixel_custom',
+  ],
+};
+
+var FB_CUSTOM_CONVERSIONS = {
+  'OGEE': [
+    'offsite_conversion.custom.1194140775429810',
+  ],
+};
+
+var KNOWN_STANDARD_ACTIONS = [
+  'link_click', 'landing_page_view', 'omni_landing_page_view',
+  'page_engagement', 'post_engagement', 'post_reaction', 'post', 'comment',
+  'video_view', 'like', 'post_interaction_gross', 'post_interaction_net',
+  'onsite_conversion.post_save', 'onsite_conversion.post_net_save',
+  'onsite_conversion.post_net_like', 'onsite_conversion.post_net_comment',
+  'onsite_conversion.post_unlike', 'onsite_conversion.post_unsave',
+  'onsite_conversion.total_messaging_connection',
+  'onsite_conversion.messaging_conversation_started',
+  'onsite_conversion.messaging_conversation_started_7d',
+  'onsite_conversion.messaging_conversation_replied_7d',
+  'onsite_conversion.messaging_first_reply',
+  'onsite_conversion.messaging_user_depth_2_message_send',
+  'onsite_conversion.messaging_user_depth_3_message_send',
+  'onsite_conversion.messaging_user_depth_5_message_send',
+  'onsite_conversion.messaging_block',
+  'onsite_conversion.messaging_welcome_message_view',
+  'onsite_conversion.lead_grouped', 'lead', 'onsite_web_lead', 'onsite_conversion.lead',
+  'offsite_conversion.fb_pixel_lead', 'instagram_profile_visit', 'outbound_click',
+  'contact', 'onsite_conversion.contact', 'offsite_conversion.fb_pixel_custom.contact',
+  'offsite_conversion.fb_pixel_custom', 'offsite_complete_registration_add_meta_leads',
+  'offsite_content_view_add_meta_leads', 'offsite_search_add_meta_leads',
+];
+
+// ══════════════════════════════════════════════════════════════════
+// 3. МЕНЮ
+// ══════════════════════════════════════════════════════════════════
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Alloy Analytics')
+    .addItem('🔄 Обновить всё (по датам)',              'mainRunner')
+    .addItem('📅 Дозапись за вчера (авто)',             'dailySyncRunner')
+    .addSeparator()
+    .addItem('💰 Обновить все биллинги',               'refreshAllBillings')
+    .addItem('💰 Биллинг Facebook',                    'billingRunner')
+    .addItem('💰 Биллинг Google',                      'googleBillingRunner')
+    .addItem('💰 Биллинг TikTok',                      'tiktokBillingRunner')
+    .addSeparator()
+    .addItem('📤 Отправить биллинги в ТГ',             'sendBillingReport')
+    .addSeparator()
+    .addItem('✉️ Тест отчёта по лидам (вчера)',        'testSendTelegram')
+    .addItem('📊 Отчёт за выходные (Пт–Вс)',           'weekendReportRunner')
+    .addSeparator()
+    .addItem('⚙️ Создать/обновить лист Settings',      'setupSettingsSheet')
+    .addItem('⚙️ Настроить авто-триггер биллинга',     'setupBillingTrigger')
+    .addItem('⚙️ Настроить ВСЕ триггеры',              'setupAllTriggers')
+    .addItem('🔄 Ретрокорректировка (3 дня)',          'retroSyncRunner')
+    .addSeparator()
+    .addItem('📋 Аудит меток ВСЕХ клиентов',           'auditAllClientsActions')
+    .addItem('🆕 Онбординг нового клиента',            'onboardNewClient')
+    .addItem('🔍 Диагностика FB actions (строка 2)',   'debugFbActions')
+    .addToUi();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 4. НАСТРОЙКА ЛИСТА SETTINGS
+// ══════════════════════════════════════════════════════════════════
+function setupSettingsSheet() {
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.SETTINGS);
+  if (!sheet) sheet = ss.insertSheet(CONFIG.SHEETS.SETTINGS);
+
+  var headers = [
+    '✅', 'Клиент', 'Название в отчёте',
+    'FB ID', 'FB Статус',
+    'Google ID', 'Google Статус',
+    'TikTok ID', 'TikTok Статус',
+    'FB Порог ($)', 'FB Дата списания',
+    'Google Баланс ($)', 'Дата пополн. Google',
+    'TikTok Баланс ($)', 'Дата пополн. TikTok',
+    'TG Чат ID', 'TG Топик ID', 'Города филиалов',
+  ];
+
+  sheet.getRange('B1').setValue('Период:');
+  sheet.getRange('B1').setBackground('#4a3a1a').setFontColor('white').setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange('C1').setBackground('#fff8e1').setFontWeight('bold');
+  sheet.getRange('D1').setBackground('#fff8e1').setFontWeight('bold');
+  sheet.getRange('E1').setValue('По сегодня').setBackground('#4a3a1a').setFontColor('white').setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange('F1').insertCheckboxes();
+  sheet.getRange('B1:F1').setBorder(true, true, true, true, true, true);
+
+  sheet.getRange(2, 1, 1, headers.length).setValues([headers])
+    .setBackground('#1a472a').setFontColor('white').setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.setFrozenRows(2);
+
+  sheet.getRange(2, 4,  1, 2).setBackground('#1a3a5c');
+  sheet.getRange(2, 6,  1, 2).setBackground('#4a235a');
+  sheet.getRange(2, 8,  1, 2).setBackground('#1a4a3a');
+  sheet.getRange(2, 10, 1, 2).setBackground('#5a1a1a');
+  sheet.getRange(2, 12, 1, 2).setBackground('#b45309');
+  sheet.getRange(2, 14, 1, 2).setBackground('#1a4a3a');
+  sheet.getRange(2, 16, 1, 3).setBackground('#1a1a5a');
+
+  sheet.getRange(3, 1, 50, 1).insertCheckboxes();
+
+  var widths = [40, 130, 160, 160, 80, 130, 90, 110, 90, 90, 110, 110, 120, 110, 120, 150, 100, 180];
+  widths.forEach(function(w, i) { sheet.setColumnWidth(i + 1, w); });
+  SpreadsheetApp.getUi().alert('✅ Лист Settings настроен!');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 5. RUNNERS
+// ══════════════════════════════════════════════════════════════════
+function mainRunner() {
+  var ss            = SpreadsheetApp.getActiveSpreadsheet();
+  var settingsSheet = ss.getSheetByName(CONFIG.SHEETS.SETTINGS);
+  var logSheet      = getOrCreateSheet(ss, CONFIG.SHEETS.LOG);
+
+  var startRaw = settingsSheet.getRange('C1').getValue();
+  var endRaw   = settingsSheet.getRange('D1').getValue();
+  var useToday = settingsSheet.getRange('F1').getValue();
+  var dates    = processDates(startRaw, endRaw, useToday);
+
+  if (!dates) { SpreadsheetApp.getUi().alert('❌ Не заданы даты в C1/D1'); return; }
+
+  var fbSheet  = resetSheet(ss, CONFIG.SHEETS.FACEBOOK,
+    ['Day','Client','Campaign Name','Impressions','Result Type','Results',
+     'Amount Spent','Messaging','Landing Page Views','Leads','IG Profile Visits','Website Contacts',
+     'Link Clicks','CTR','CPM']);
+  var ggSheet  = resetSheet(ss, CONFIG.SHEETS.GOOGLE,
+    ['Day','Client','Campaign Name','Impressions','Clicks','Amount Spent','Conversions','CTR','CPM']);
+  var ttSheet  = resetSheet(ss, CONFIG.SHEETS.TIKTOK,
+    ['Day','Client','Campaign Name','Impressions','Clicks','Amount Spent','Conversions','CTR','CPM']);
+  resetSheet(ss, CONFIG.SHEETS.LOG, ['Время','Клиент','Платформа','Ошибка']);
+
+  var lastRow         = settingsSheet.getLastRow();
+  if (lastRow < 2) return;
+  var clientData      = settingsSheet.getRange(3, 1, Math.max(lastRow - 2, 1), 18).getValues();
+  var googleToken     = getGoogleAccessToken();
+  var ok = 0, errors = 0;
+
+  clientData.forEach(function(row, i) {
+    var active   = row[CONFIG.COL.ACTIVE];
+    var client   = row[CONFIG.COL.CLIENT];
+    var fbId     = row[CONFIG.COL.FB_ID];
+    var googleId = row[CONFIG.COL.GOOGLE_ID];
+    var ttId     = row[CONFIG.COL.TIKTOK_ID];
+    if (!active || !client) return;
+
+    if (fbId) {
+      var r = safeRun(function() { fetchFacebookData(fbSheet, client, fbId.toString(), dates.start, dates.end); }, 'FB:' + client);
+      settingsSheet.getRange(i + 3, CONFIG.COL.FB_STATUS + 1).setValue(r.ok ? '✅ OK' : '❌ ' + r.error);
+      r.ok ? ok++ : (errors++, logError(logSheet, client, 'Facebook', r.error));
+    }
+    if (googleId) {
+      var gId = googleId.toString().replace(/\D/g, '');
+      if (gId.length > 5) {
+        var r2 = safeRun(function() { fetchGoogleData(ggSheet, client, gId, googleToken, dates.start, dates.end); }, 'Google:' + client);
+        settingsSheet.getRange(i + 3, CONFIG.COL.GOOGLE_STATUS + 1).setValue(r2.ok ? '✅ OK' : '❌ ' + r2.error);
+        r2.ok ? ok++ : (errors++, logError(logSheet, client, 'Google', r2.error));
+      }
+    }
+    if (ttId) {
+      var r3 = safeRun(function() { fetchTikTokData(ttSheet, client, ttId.toString(), dates.start, dates.end); }, 'TikTok:' + client);
+      settingsSheet.getRange(i + 3, CONFIG.COL.TIKTOK_STATUS + 1).setValue(r3.ok ? '✅ OK' : '❌ ' + r3.error);
+      r3.ok ? ok++ : (errors++, logError(logSheet, client, 'TikTok', r3.error));
+    }
+  });
+
+  sortSheetByDate(fbSheet);
+  sortSheetByDate(ggSheet);
+  sortSheetByDate(ttSheet);
+
+  SpreadsheetApp.getUi().alert('✅ Готово! Успешно: ' + ok + ', Ошибок: ' + errors);
+}
+
+function dailySyncRunner() {
+  var ss            = SpreadsheetApp.getActiveSpreadsheet();
+  var settingsSheet = ss.getSheetByName(CONFIG.SHEETS.SETTINGS);
+  if (!settingsSheet) return;
+  var yesterday     = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  var dateStr     = Utilities.formatDate(yesterday, CONFIG.TIMEZONE, 'yyyy-MM-dd');
+  var lastRow     = settingsSheet.getLastRow();
+  if (lastRow < 2) return;
+  var clientData  = settingsSheet.getRange(3, 1, Math.max(lastRow - 2, 1), 18).getValues();
+  var googleToken = getGoogleAccessToken();
+  var fbSheet     = ss.getSheetByName(CONFIG.SHEETS.FACEBOOK);
+  var ggSheet     = ss.getSheetByName(CONFIG.SHEETS.GOOGLE);
+  var ttSheet     = ss.getSheetByName(CONFIG.SHEETS.TIKTOK);
+
+  clientData.forEach(function(row) {
+    var active   = row[CONFIG.COL.ACTIVE];
+    var client   = row[CONFIG.COL.CLIENT];
+    var fbId     = row[CONFIG.COL.FB_ID];
+    var googleId = row[CONFIG.COL.GOOGLE_ID];
+    var ttId     = row[CONFIG.COL.TIKTOK_ID];
+    if (!active || !client) return;
+
+    if (fbId)     safeRun(function() { fetchFacebookData(fbSheet, client, fbId.toString(), dateStr, dateStr); }, 'FB:' + client);
+    if (googleId) {
+      var gId = googleId.toString().replace(/\D/g, '');
+      if (gId.length > 5) safeRun(function() { fetchGoogleData(ggSheet, client, gId, googleToken, dateStr, dateStr); }, 'Google:' + client);
+    }
+    if (ttId) safeRun(function() { fetchTikTokData(ttSheet, client, ttId.toString(), dateStr, dateStr); }, 'TikTok:' + client);
+  });
+  buildAndSendLeadReports(dateStr);
+}
+
+function refreshAllBillings() {
+  billingRunner();
+  googleBillingRunner();
+  tiktokBillingRunner();
+  SpreadsheetApp.getUi().alert('✅ Все биллинги обновлены!');
+}
+
+function dailyBillingRunner() {
+  try {
+    billingRunner();
+    googleBillingRunner();
+    tiktokBillingRunner();
+    sendBillingReport();
+  } catch(e) { Logger.log('dailyBillingRunner error: ' + e.message); }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 6. FACEBOOK — ВЫГРУЗКА
+// ══════════════════════════════════════════════════════════════════
+function fetchFacebookData(sheet, client, adAccountId, start, end) {
+  var id    = adAccountId.indexOf('act_') === 0 ? adAccountId : 'act_' + adAccountId;
+  var token = CONFIG.FB.ACCESS_TOKEN();
+  var params = [
+    'fields=campaign_name,impressions,spend,actions,inline_link_clicks,date_start',
+    'time_range=' + encodeURIComponent(JSON.stringify({ since: start, until: end })),
+    'time_increment=1',
+    'level=campaign',
+    'limit=500',
+    'action_report_time=conversion',
+    'action_attribution_windows=' + encodeURIComponent('["7d_click","1d_view"]'),
+    'access_token=' + token,
+  ].join('&');
+
+  var url  = 'https://graph.facebook.com/' + CONFIG.FB.API_VERSION + '/' + id + '/insights?' + params;
+  var rows = [];
+  var page = 0;
+
+  do {
+    if (page++ > 20) break;
+    var rawResp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    var rawText = rawResp.getContentText();
+    var res;
+    try { res = JSON.parse(rawText); }
+    catch(parseErr) { throw new Error('FB HTTP ' + rawResp.getResponseCode() + ': ' + rawText.substring(0, 100)); }
+    if (res.error) throw new Error('FB [' + res.error.code + ']: ' + res.error.message);
+    if (!res.data || res.data.length === 0) break;
+
+    res.data.forEach(function(item) {
+      var metrics = parseFbActions(item.actions || [], item.campaign_name, client);
+      var resObj  = calcResults(metrics, item.campaign_name, client);
+      rows.push([
+        item.date_start, client, item.campaign_name,
+        toInt(item.impressions), resObj.type, resObj.value,
+        toMoney(item.spend),
+        metrics.messaging, metrics.lpv, metrics.leads, metrics.igVisits, metrics.webContacts,
+        toInt(item.inline_link_clicks),
+        toInt(item.impressions) > 0 ? Math.round(toInt(item.inline_link_clicks) / toInt(item.impressions) * 10000) / 100 : 0,
+        toInt(item.impressions) > 0 ? Math.round(toMoney(item.spend) / toInt(item.impressions) * 1000 * 100) / 100 : 0,
+      ]);
+    });
+    url = (res.paging && res.paging.next) ? res.paging.next : null;
+  } while (url);
+
+  if (rows.length > 0) batchAppend(sheet, rows);
+}
+
+function parseFbActions(actions, campaignName, client) {
+  function one(type) {
+    var a = actions.find(function(x) { return x.action_type === type; });
+    return a ? Number(a.value || 0) : 0;
+  }
+  function many(types) { return types.reduce(function(acc, t) { return acc + one(t); }, 0); }
+
+  var leadsGrouped = many(FB_ACTIONS.LEADS_GROUPED);
+  var leads        = leadsGrouped > 0 ? leadsGrouped : many(FB_ACTIONS.LEADS_RAW);
+  var igNative = one('instagram_profile_visit');
+  var nameLow  = (campaignName || '').toLowerCase();
+  var isIgCamp = nameLow.indexOf('профил') !== -1 || nameLow.indexOf('instagram') !== -1 || nameLow.indexOf(' ig ') !== -1;
+  var igVisits = igNative > 0 ? igNative : (isIgCamp ? one('link_click') : 0);
+  var messagingVal = 0;
+  for (var mi = 0; mi < FB_ACTIONS.MESSAGING.length; mi++) {
+    var mv = one(FB_ACTIONS.MESSAGING[mi]);
+    if (mv > 0) { messagingVal = mv; break; }
+  }
+  var customEvents = FB_CUSTOM_CONVERSIONS[client] || [];
+  var customTotal  = customEvents.reduce(function(acc, t) { return acc + one(t); }, 0);
+
+  return {
+    messaging:   messagingVal,
+    lpv:         one('landing_page_view'),
+    leads:       leads,
+    igVisits:    igVisits,
+    linkClicks:  one('link_click'),
+    outbound:    one('outbound_click'),
+    webContacts: many(FB_ACTIONS.WEBSITE_CONTACTS) + customTotal,
+    customTotal: customTotal,
+  };
+}
+
+function calcResults(m, campaignName, client) {
+  var name = (campaignName || '').toLowerCase();
+  if (FB_CUSTOM_CONVERSIONS[client] && m.customTotal > 0) return { type: 'Custom conversions', value: m.customTotal };
+  if (name.indexOf('whatsapp') !== -1 || name.indexOf('сообщен') !== -1 || name.indexOf('мессенджер') !== -1 || name.indexOf('message') !== -1 || name.indexOf('директ') !== -1 || name.indexOf('переписк') !== -1) return { type: 'Messaging conversations', value: m.messaging || 0 };
+  if (name.indexOf('конверси') !== -1 || name.indexOf('смас') !== -1 || name.indexOf('маммо') !== -1 || name.indexOf('contact') !== -1) {
+    if (m.leads > 0)       return { type: 'Leads',             value: m.leads };
+    if (m.webContacts > 0) return { type: 'Website contacts', value: m.webContacts };
+    return { type: 'Landing page views', value: m.lpv || 0 };
+  }
+  if (name.indexOf('лид') !== -1 || name.indexOf('lead') !== -1 || name.indexOf('форм') !== -1 || name.indexOf('заявк') !== -1) return { type: 'Leads', value: m.leads || 0 };
+  if (name.indexOf('трафик') !== -1 || name.indexOf('сайт') !== -1 || name.indexOf('traffic') !== -1 || name.indexOf('website') !== -1 || name.indexOf('клик') !== -1) return { type: 'Link clicks / LPV', value: m.lpv > 0 ? m.lpv : (m.outbound > 0 ? m.outbound : m.linkClicks) };
+  if (name.indexOf('профил') !== -1 || name.indexOf('instagram') !== -1 || name.indexOf(' ig ') !== -1 || name.indexOf('ig_') !== -1) return { type: 'Instagram profile visits', value: m.igVisits > 0 ? m.igVisits : m.linkClicks };
+  
+  if (m.messaging   > 0) return { type: 'Messaging conversations', value: m.messaging };
+  if (m.leads       > 0) return { type: 'Leads',                   value: m.leads };
+  if (m.webContacts > 0) return { type: 'Website contacts',        value: m.webContacts };
+  if (m.igVisits    > 0) return { type: 'IG Profile visits',       value: m.igVisits };
+  if (m.lpv         > 0) return { type: 'Landing page views',      value: m.lpv };
+  if (m.outbound    > 0) return { type: 'Outbound clicks',         value: m.outbound };
+  if (m.linkClicks  > 0) return { type: 'Link clicks',             value: m.linkClicks };
+  return { type: '—', value: 0 };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 7. GOOGLE ADS — ВЫГРУЗКА
+// ══════════════════════════════════════════════════════════════════
+function fetchGoogleData(sheet, client, customerId, accessToken, start, end) {
+  var url   = 'https://googleads.googleapis.com/v22/customers/' + customerId + '/googleAds:search';
+  var query = [
+    'SELECT segments.date, campaign.name, metrics.impressions,',
+    'metrics.clicks, metrics.cost_micros, metrics.conversions,',
+    'metrics.ctr, metrics.average_cpm',
+    'FROM campaign',
+    "WHERE segments.date >= '" + start + "'",
+    "AND segments.date <= '" + end + "'",
+    "AND campaign.status != 'REMOVED'",
+    'ORDER BY segments.date ASC',
+  ].join(' ');
+
+  var result = googleAdsRequest(url, query, accessToken);
+  if (!result.ok) throw new Error(result.error);
+
+  var data = JSON.parse(result.body);
+  if (!data.results || data.results.length === 0) return;
+
+  var rows = data.results.map(function(row) {
+    return [
+      row.segments.date, client, row.campaign.name,
+      toInt(row.metrics ? row.metrics.impressions : 0),
+      toInt(row.metrics ? row.metrics.clicks : 0),
+      toMoney(Number(row.metrics ? row.metrics.costMicros || 0 : 0) / 1000000),
+      toFloat(row.metrics ? row.metrics.conversions : 0),
+      Math.round((row.metrics ? (row.metrics.ctr || 0) : 0) * 10000) / 100,
+      Math.round((row.metrics ? (row.metrics.averageCpm || 0) : 0) / 10000) / 100,
+    ];
+  });
+  if (rows.length > 0) batchAppend(sheet, rows);
+}
+
+function googleAdsRequest(url, query, accessToken) {
+  var baseHeaders = {
+    'Authorization':   'Bearer ' + accessToken,
+    'developer-token': CONFIG.GOOGLE.DEVELOPER_TOKEN().trim(),
+  };
+  var mccHeaders = {};
+  for (var k in baseHeaders) mccHeaders[k] = baseHeaders[k];
+  mccHeaders['login-customer-id'] = CONFIG.GOOGLE.MCC_ID().trim();
+
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'post', contentType: 'application/json',
+    headers: baseHeaders, payload: JSON.stringify({ query: query }),
+    muteHttpExceptions: true,
+  });
+  var code = resp.getResponseCode();
+  var body = resp.getContentText();
+
+  if (code !== 200) {
+    resp = UrlFetchApp.fetch(url, {
+      method: 'post', contentType: 'application/json',
+      headers: mccHeaders, payload: JSON.stringify({ query: query }),
+      muteHttpExceptions: true,
+    });
+    code = resp.getResponseCode();
+    body = resp.getContentText();
+  }
+
+  if (code !== 200) {
+    var errMsg = 'HTTP ' + code;
+    try { errMsg = JSON.parse(body).error.message; } catch(e) {}
+    return { ok: false, error: errMsg };
+  }
+  return { ok: true, body: body };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 8. TIKTOK — ВЫГРУЗКА (GET-запрос)
+// ══════════════════════════════════════════════════════════════════
+function fetchTikTokData(sheet, client, advertiserId, start, end) {
+  var token  = CONFIG.TT.ACCESS_TOKEN();
+  var params = [
+    'advertiser_id=' + advertiserId,
+    'report_type=BASIC',
+    'data_level=AUCTION_CAMPAIGN',
+    'dimensions=' + encodeURIComponent('["campaign_id","stat_time_day"]'),
+    'metrics='    + encodeURIComponent('["campaign_name","impressions","clicks","spend","conversion","ctr","cpm"]'),
+    'start_date=' + start,
+    'end_date='   + end,
+    'page_size=1000',
+  ].join('&');
+
+  var rawResp = UrlFetchApp.fetch(
+    'https://business-api.tiktok.com/open_api/v1.3/report/integrated/get/?' + params,
+    { method: 'get', headers: { 'Access-Token': token }, muteHttpExceptions: true }
+  );
+  var res;
+  try { res = JSON.parse(rawResp.getContentText()); }
+  catch(e) { throw new Error('TT HTTP ' + rawResp.getResponseCode() + ': ' + rawResp.getContentText().substring(0, 100)); }
+  if (res.code !== 0) throw new Error('TT [' + res.code + ']: ' + res.message);
+
+  var rows = (res.data && res.data.list ? res.data.list : []).map(function(item) {
+    var d = item.dimensions || {}, m = item.metrics || {};
+    return [
+      (d.stat_time_day || '').split(' ')[0], client, m.campaign_name,
+      toInt(m.impressions),
+      toInt(m.clicks),
+      Math.round(parseFloat(m.spend || 0) * 100) / 100,
+      Math.round(parseFloat(m.conversion || 0) * 100) / 100,
+      Math.round(parseFloat(m.ctr || 0) * 100) / 100,
+      Math.round(parseFloat(m.cpm || 0) * 100) / 100,
+    ];
+  });
+  if (rows.length > 0) batchAppend(sheet, rows);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 9. БИЛЛИНГ FACEBOOK
+// ══════════════════════════════════════════════════════════════════
+function billingRunner() {
+  var ss            = SpreadsheetApp.getActiveSpreadsheet();
+  var settingsSheet = ss.getSheetByName(CONFIG.SHEETS.SETTINGS);
+  var billingSheet  = resetSheet(ss, 'Биллинги_FB', [
+    'Клиент', 'Имя кабинета', 'Валюта', 'Текущий долг', 'Порог списания', 'До порога (остаток)', 'Дата списания',
+    'Расход вчера / Бюджет', 'Лимит аккаунта (ASL)', 'Потрачено по лимиту', 'Остаток по лимиту', 'Статус',
+  ]);
+
+  var lastRow    = settingsSheet.getLastRow();
+  if (lastRow < 2) return;
+  var clientData = settingsSheet.getRange(3, 1, Math.max(lastRow - 2, 1), 18).getValues();
+  var token      = CONFIG.FB.ACCESS_TOKEN();
+  var rows       = [];
+
+  clientData.forEach(function(row) {
+    var active    = row[CONFIG.COL.ACTIVE];
+    var client    = row[CONFIG.COL.CLIENT];
+    var fbId      = row[CONFIG.COL.FB_ID];
+    var threshold = Number(row[CONFIG.COL.FB_THRESHOLD]) || 0;
+    var billDate  = row[CONFIG.COL.FB_BILL_DATE] || '—';
+    if (!active || !client || !fbId) return;
+
+    var id = fbId.toString().indexOf('act_') === 0 ? fbId : 'act_' + fbId;
+
+    try {
+      var baseRes = JSON.parse(UrlFetchApp.fetch(
+        'https://graph.facebook.com/' + CONFIG.FB.API_VERSION + '/' + id +
+        '?fields=' + encodeURIComponent('name,currency,balance,spend_cap,amount_spent,account_status,disable_reason') +
+        '&access_token=' + token,
+        { muteHttpExceptions: true }
+      ).getContentText());
+      if (baseRes.error) { rows.push([client, '❌ ' + baseRes.error.message]); return; }
+
+      var currency = baseRes.currency || '';
+      var debt     = baseRes.balance ? Number(baseRes.balance) / 100 : 0;
+      var acctStatus = Number(baseRes.account_status || 1);
+      var acctStatusLabel = '';
+      if      (acctStatus === 2) acctStatusLabel = '🔴 Аккаунт отключён';
+      else if (acctStatus === 3) acctStatusLabel = '🔴 Аккаунт неактивен';
+      else if (acctStatus === 7) acctStatusLabel = '🔴 Ошибка оплаты';
+      else if (acctStatus === 9) acctStatusLabel = '🔴 Платёж просрочен';
+
+      try {
+        var billRes = JSON.parse(UrlFetchApp.fetch(
+          'https://graph.facebook.com/' + CONFIG.FB.API_VERSION + '/' + id +
+          '?fields=' + encodeURIComponent('adspaymentcycle,next_bill_date') +
+          '&access_token=' + token, { muteHttpExceptions: true }
+        ).getContentText());
+        if (!billRes.error) {
+          if (billRes.adspaymentcycle && billRes.adspaymentcycle.data && billRes.adspaymentcycle.data[0]) {
+            var apiThreshold = Number(billRes.adspaymentcycle.data[0].threshold_amount || 0) / 100;
+            if (apiThreshold > 0) threshold = apiThreshold;
+          }
+          if (billRes.next_bill_date && billDate === '—') {
+            var d = new Date(billRes.next_bill_date);
+            var months = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+            billDate = d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+          }
+        }
+      } catch(e2) {}
+
+      var tillThreshold = threshold > 0 ? Math.round((threshold - debt) * 100) / 100 : '—';
+      var spendYesterday = 0, campBudget = 0;
+      try {
+        var batchBody = JSON.stringify([
+          { method: 'GET', relative_url: id + '/insights?fields=spend&date_preset=yesterday&level=account' },
+          { method: 'GET', relative_url: id + '/campaigns?fields=status,daily_budget&limit=500' }
+        ]);
+        var batchRes = JSON.parse(UrlFetchApp.fetch(
+          'https://graph.facebook.com/' + CONFIG.FB.API_VERSION,
+          { method: 'post', payload: { access_token: token, batch: batchBody }, muteHttpExceptions: true }
+        ).getContentText());
+        if (Array.isArray(batchRes)) {
+          if (batchRes[0] && batchRes[0].code === 200) {
+            var insData = JSON.parse(batchRes[0].body);
+            if (insData.data && insData.data[0]) spendYesterday = parseFloat(insData.data[0].spend || 0);
+          }
+          if (batchRes[1] && batchRes[1].code === 200) {
+            var campData = JSON.parse(batchRes[1].body);
+            if (campData.data) {
+              campBudget = campData.data.filter(function(c) { return c.status === 'ACTIVE' && c.daily_budget; })
+                .reduce(function(s, c) { return s + Number(c.daily_budget) / 100; }, 0);
+            }
+          }
+        }
+      } catch(e3) {}
+
+      var spendYestRnd = Math.round(spendYesterday * 100) / 100;
+      var campBudgRnd  = Math.round(campBudget * 100) / 100;
+      var budgetDisplay = spendYestRnd > 0 && campBudgRnd > 0 ? spendYestRnd + ' / ' + campBudgRnd : spendYestRnd > 0 ? spendYestRnd : campBudgRnd > 0 ? '— / ' + campBudgRnd : '—';
+
+      var spendCap   = baseRes.spend_cap    ? Number(baseRes.spend_cap)    / 100 : 0;
+      var amtSpent   = baseRes.amount_spent ? Number(baseRes.amount_spent) / 100 : 0;
+      var aslLimit   = spendCap > 0 ? Math.round(spendCap * 100) / 100              : 'Без лимита';
+      var aslSpent   = spendCap > 0 ? Math.round(amtSpent * 100) / 100              : '—';
+      var aslRemains = spendCap > 0 ? Math.round((spendCap - amtSpent) * 100) / 100 : '—';
+
+      var status = acctStatusLabel || '✅ OK';
+      if (acctStatusLabel === '') {
+        if      (threshold > 0 && debt >= threshold * 0.9)     status = '🔴 Близко к порогу!';
+        else if (spendCap  > 0 && amtSpent >= spendCap * 0.9)  status = '🔴 Лимит исчерпан!';
+        else if (threshold > 0 && debt >= threshold * 0.7)     status = '🟡 70% порога';
+        else if (spendCap  > 0 && amtSpent >= spendCap * 0.7)  status = '🟡 70% лимита';
+      }
+
+      rows.push([
+        client, baseRes.name || '—', currency, Math.round(debt * 100) / 100,
+        threshold > 0 ? Math.round(threshold * 100) / 100 : '—', tillThreshold, billDate,
+        budgetDisplay, aslLimit, aslSpent, aslRemains, status,
+      ]);
+    } catch(e) { rows.push([client, '❌ ' + e.message]); }
+  });
+
+  if (rows.length > 0) {
+    batchAppend(billingSheet, rows);
+    for (var r = 2; r <= billingSheet.getLastRow(); r++) {
+      var sv = billingSheet.getRange(r, 12).getValue().toString();
+      if (sv.indexOf('🔴') !== -1)      billingSheet.getRange(r, 1, 1, 12).setBackground('#fce8e6');
+      else if (sv.indexOf('🟡') !== -1) billingSheet.getRange(r, 1, 1, 12).setBackground('#fff8e1');
+    }
+    billingSheet.autoResizeColumns(1, 12);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 10. БИЛЛИНГ TIKTOK (С Виртуальным Балансом)
+// ══════════════════════════════════════════════════════════════════
+function tiktokBillingRunner() {
+  var ss            = SpreadsheetApp.getActiveSpreadsheet();
+  var settingsSheet = ss.getSheetByName(CONFIG.SHEETS.SETTINGS);
+  var billingSheet  = resetSheet(ss, 'Биллинги_TikTok', [
+    'Клиент', 'Advertiser ID', 'Баланс (остаток)', 'Дата пополнения',
+    'Расход вчера', 'Расход за 7 дней', 'Расход за месяц', 'Прогноз остатка', 'Статус аккаунта',
+  ]);
+
+  var lastRow    = settingsSheet.getLastRow();
+  if (lastRow < 2) return;
+  var clientData = settingsSheet.getRange(3, 1, Math.max(lastRow - 2, 1), 18).getValues();
+  var token      = CONFIG.TT.ACCESS_TOKEN();
+  var rows       = [];
+
+  clientData.forEach(function(row) {
+    var active   = row[CONFIG.COL.ACTIVE];
+    var client   = row[CONFIG.COL.CLIENT];
+    var ttId     = row[CONFIG.COL.TIKTOK_ID];
+    var manualBal= row[CONFIG.COL.TT_BAL]      || '—';
+    var ttBalDt  = row[CONFIG.COL.TT_BAL_DATE] || '—';
+    if (!active || !client || !ttId) return;
+
+    try {
+      function getTtSpend(startDate, endDate) {
+        var ttParams = [
+          'advertiser_id=' + ttId.toString(),
+          'report_type=BASIC',
+          'data_level=AUCTION_ADVERTISER',
+          'dimensions=' + encodeURIComponent('["advertiser_id"]'),
+          'metrics='    + encodeURIComponent('["spend"]'),
+          'start_date=' + startDate,
+          'end_date='   + endDate,
+          'page_size=1',
+        ].join('&');
+        var ttResp = UrlFetchApp.fetch(
+          'https://business-api.tiktok.com/open_api/v1.3/report/integrated/get/?' + ttParams,
+          { method: 'get', headers: { 'Access-Token': token }, muteHttpExceptions: true }
+        );
+        var res;
+        try { res = JSON.parse(ttResp.getContentText()); } catch(e) { return 0; }
+        if (res.code !== 0) return 0;
+        var list = res.data && res.data.list ? res.data.list : [];
+        return list.length > 0 ? Math.round(parseFloat(list[0].metrics.spend || 0) * 100) / 100 : 0;
+      }
+
+      var yesterday  = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+      var yStr       = Utilities.formatDate(yesterday, CONFIG.TIMEZONE, 'yyyy-MM-dd');
+      var d7         = new Date(); d7.setDate(d7.getDate() - 7);
+      var d7Str      = Utilities.formatDate(d7, CONFIG.TIMEZONE, 'yyyy-MM-dd');
+      var monthStart = Utilities.formatDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1), CONFIG.TIMEZONE, 'yyyy-MM-dd');
+
+      var spendYest  = getTtSpend(yStr, yStr);
+      var spend7d    = getTtSpend(d7Str, yStr);
+      var spendMonth = 0;
+      if (monthStart <= yStr) spendMonth = getTtSpend(monthStart, yStr);
+
+      var spendSinceTopUp = 0;
+      if (ttBalDt && ttBalDt !== '—' && ttBalDt !== '') {
+        try {
+          var bd = ttBalDt instanceof Date ? ttBalDt : new Date(ttBalDt);
+          if (!isNaN(bd.getTime())) {
+            var bdStr = Utilities.formatDate(bd, CONFIG.TIMEZONE, 'yyyy-MM-dd');
+            if (bdStr <= yStr) spendSinceTopUp = getTtSpend(bdStr, yStr);
+          }
+        } catch(e) {}
+      }
+
+      var ttBalNum = parseFloat(String(manualBal).replace(',', '.')) || 0;
+      var currentVirtualBal = ttBalNum;
+      if (spendSinceTopUp > 0) {
+         currentVirtualBal = Math.round((ttBalNum - spendSinceTopUp) * 100) / 100;
+      }
+
+      var ttAvgDay = spend7d > 0 ? Math.round(spend7d / 7 * 100) / 100 : 0;
+      var ttForecast = '—';
+      if (currentVirtualBal > 0 && ttAvgDay > 0) {
+        var ttDaysLeft = Math.round(currentVirtualBal / ttAvgDay);
+        if      (ttDaysLeft <= 1)  ttForecast = '🔴 Заканчивается сегодня!';
+        else if (ttDaysLeft <= 2)  ttForecast = '🔴 ~' + ttDaysLeft + ' дн.!';
+        else if (ttDaysLeft <= 5)  ttForecast = '🟡 ~' + ttDaysLeft + ' дн.';
+        else                       ttForecast = '✅ ~' + ttDaysLeft + ' дн.';
+      } else if (currentVirtualBal <= 0 && ttBalNum > 0) {
+        ttForecast = '🔴 Баланс исчерпан!';
+      }
+
+      var statusRes = JSON.parse(UrlFetchApp.fetch(
+        'https://business-api.tiktok.com/open_api/v1.3/advertiser/info/?advertiser_ids=' + encodeURIComponent('["' + ttId + '"]'),
+        { headers: { 'Access-Token': token }, muteHttpExceptions: true }
+      ).getContentText());
+      var acctStatus = '✅ Активен';
+      if (statusRes.code === 0 && statusRes.data && statusRes.data.list && statusRes.data.list[0]) {
+        var st = statusRes.data.list[0].status || '';
+        if      (st === 'ENABLE' || st === 'STATUS_ENABLE')   acctStatus = '✅ Активен';
+        else if (st === 'DISABLE' || st === 'STATUS_DISABLE') acctStatus = '🔴 Аккаунт отключён';
+        else if (st === 'PUNISH')                             acctStatus = '🔴 Аккаунт заблокирован';
+        else if (st === 'PAYMENT_FAILED')                     acctStatus = '🔴 Ошибка оплаты';
+        else if (st === 'OVERDUE')                            acctStatus = '🔴 Платёж просрочен';
+        else if (st !== '')                                   acctStatus = '🔴 ' + st;
+      }
+
+      rows.push([
+        client, ttId.toString(),
+        currentVirtualBal, ttBalDt,
+        spendYest, spend7d, spendMonth,
+        ttForecast, acctStatus,
+      ]);
+    } catch(e) {
+      rows.push([client, ttId.toString(), '❌ ' + e.message, '', '', '', '', '', '']);
+    }
+  });
+
+  if (rows.length > 0) {
+    batchAppend(billingSheet, rows);
+    for (var r = 2; r <= billingSheet.getLastRow(); r++) {
+      var svForecast = billingSheet.getRange(r, 8).getValue().toString();
+      var svStatus   = billingSheet.getRange(r, 9).getValue().toString();
+      if (svForecast.indexOf('🔴') !== -1 || svStatus.indexOf('🔴') !== -1) {
+         billingSheet.getRange(r, 1, 1, 9).setBackground('#fce8e6');
+      } else if (svForecast.indexOf('🟡') !== -1) {
+         billingSheet.getRange(r, 1, 1, 9).setBackground('#fff8e1');
+      }
+    }
+    billingSheet.autoResizeColumns(1, 9);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 11. БИЛЛИНГ GOOGLE (С Виртуальным Балансом)
+// ══════════════════════════════════════════════════════════════════
+function googleBillingRunner() {
+  var ss            = SpreadsheetApp.getActiveSpreadsheet();
+  var settingsSheet = ss.getSheetByName(CONFIG.SHEETS.SETTINGS);
+  var billingSheet  = resetSheet(ss, 'Биллинги_Google', [
+    'Клиент', 'ID Аккаунта', 'Валюта', 'Баланс (остаток)',
+    'Расход вчера', 'Расход за 3 дня', 'Расход за 5 дней', 'Расход за 7 дней',
+    'Прогноз остатка', 'Дневной бюджет кампаний', 'Активных кампаний', 'Статус аккаунта',
+  ]);
+
+  var lastRow     = settingsSheet.getLastRow();
+  if (lastRow < 2) return;
+  var clientData  = settingsSheet.getRange(3, 1, Math.max(lastRow - 2, 1), 18).getValues();
+  var accessToken = getGoogleAccessToken();
+  var rows        = [];
+
+  clientData.forEach(function(row) {
+    var active    = row[CONFIG.COL.ACTIVE];
+    var client    = row[CONFIG.COL.CLIENT];
+    var googleId  = row[CONFIG.COL.GOOGLE_ID];
+    var manualBal     = row[CONFIG.COL.GOOGLE_BAL]      || '—';
+    var manualBalDate = row[CONFIG.COL.GOOGLE_BAL_DATE] || null;
+    if (!active || !client || !googleId) return;
+    var cleanId = googleId.toString().replace(/\D/g, '');
+    if (cleanId.length < 5) return;
+
+    try {
+      var data = fetchGoogleBillingData(cleanId, accessToken, manualBalDate);
+
+      // Виртуальный баланс: вычитаем расходы с даты пополнения
+      var ggBalNum  = parseFloat(String(manualBal).replace(',', '.')) || 0;
+      var currentVirtualBal = ggBalNum;
+      if (data.spendSinceTopUp > 0) {
+         currentVirtualBal = Math.round((ggBalNum - data.spendSinceTopUp) * 100) / 100;
+      }
+
+      var ggAvgDay  = data.spend7d > 0 ? Math.round(data.spend7d / 7 * 100) / 100 : 0;
+      var ggForecast = '—';
+      if (currentVirtualBal > 0 && ggAvgDay > 0) {
+        var ggDaysLeft = Math.round(currentVirtualBal / ggAvgDay);
+        if      (ggDaysLeft <= 1)  ggForecast = '🔴 Заканчивается сегодня!';
+        else if (ggDaysLeft <= 2)  ggForecast = '🔴 ~' + ggDaysLeft + ' дн.!';
+        else if (ggDaysLeft <= 5)  ggForecast = '🟡 ~' + ggDaysLeft + ' дн.';
+        else                       ggForecast = '✅ ~' + ggDaysLeft + ' дн.';
+      } else if (currentVirtualBal <= 0 && ggBalNum > 0) {
+        ggForecast = '🔴 Баланс исчерпан!';
+      }
+
+      rows.push([
+        client, cleanId, data.currency, currentVirtualBal,
+        data.spendYesterday, data.spend3d, data.spend5d, data.spend7d,
+        ggForecast, data.campBudget > 0 ? Math.round(data.campBudget * 100) / 100 : '—',
+        data.activeCamps, data.accountStatus,
+      ]);
+    } catch(e) { rows.push([client, cleanId, '❌ ' + e.message, '', '', '', '', '', '', '', '', '']); }
+  });
+
+  if (rows.length > 0) { batchAppend(billingSheet, rows); billingSheet.autoResizeColumns(1, 12); }
+}
+
+function fetchGoogleBillingData(customerId, accessToken, balDateRaw) {
+  var url = 'https://googleads.googleapis.com/v22/customers/' + customerId + '/googleAds:search';
+  function gaReq(query) {
+    var r = googleAdsRequest(url, query, accessToken);
+    if (!r.ok) throw new Error(r.error);
+    return JSON.parse(r.body).results || [];
+  }
+
+  var custRows = gaReq('SELECT customer.currency_code, customer.status FROM customer LIMIT 1');
+  var currency = custRows[0] ? (custRows[0].customer.currencyCode || '—') : '—';
+  var status   = custRows[0] ? (custRows[0].customer.status || '—') : '—';
+
+  function getSpend(period) {
+    var r = gaReq('SELECT metrics.cost_micros FROM customer WHERE segments.date DURING ' + period);
+    if (!r.length) return 0;
+    return Math.round((r.reduce(function(s, row) { return s + Number(row.metrics ? row.metrics.costMicros || 0 : 0); }, 0)) / 10000) / 100;
+  }
+  function getSpendRange(startDate, endDate) {
+    var r = gaReq('SELECT metrics.cost_micros FROM customer WHERE segments.date >= \'' + startDate + '\' AND segments.date <= \'' + endDate + '\'');
+    if (!r.length) return 0;
+    return Math.round((r.reduce(function(s, row) { return s + Number(row.metrics ? row.metrics.costMicros || 0 : 0); }, 0)) / 10000) / 100;
+  }
+
+  var campRows    = gaReq('SELECT campaign.name, campaign.status, campaign_budget.amount_micros FROM campaign WHERE campaign.status = \'ENABLED\' AND campaign.serving_status = \'SERVING\'');
+  var activeCamps = campRows.length;
+  var campBudget  = campRows.reduce(function(s, row) { return s + (row.campaignBudget && row.campaignBudget.amountMicros ? Number(row.campaignBudget.amountMicros) / 1000000 : 0); }, 0);
+
+  var yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  var yStr = Utilities.formatDate(yesterday, 'GMT+5', 'yyyy-MM-dd');
+  var d3Str = Utilities.formatDate(new Date(yesterday.getTime() - 2*86400000), 'GMT+5', 'yyyy-MM-dd');
+  var d5Str = Utilities.formatDate(new Date(yesterday.getTime() - 4*86400000), 'GMT+5', 'yyyy-MM-dd');
+  var d7Str = Utilities.formatDate(new Date(yesterday.getTime() - 6*86400000), 'GMT+5', 'yyyy-MM-dd');
+
+  var spendSinceTopUp = 0;
+  if (balDateRaw && balDateRaw !== '—' && balDateRaw !== '') {
+    try {
+      var bd = balDateRaw instanceof Date ? balDateRaw : new Date(balDateRaw);
+      if (!isNaN(bd.getTime())) {
+        var bdStr = Utilities.formatDate(bd, 'GMT+5', 'yyyy-MM-dd');
+        if (bdStr <= yStr) spendSinceTopUp = getSpendRange(bdStr, yStr);
+      }
+    } catch(e) {}
+  }
+
+  var statusLabel = '✅ Активен';
+  if      (status === 'SUSPENDED')          statusLabel = '🔴 Ошибка оплаты / Платёж просрочен';
+  else if (status === 'CANCELED')           statusLabel = '🔴 Аккаунт закрыт';
+  else if (status === 'PAYMENT_DECLINED')   statusLabel = '🔴 Ошибка оплаты';
+  else if (status !== 'ENABLED' && status !== '') statusLabel = '🔴 ' + status;
+
+  return {
+    currency:      currency,
+    accountStatus: statusLabel,
+    spendMonth:    getSpend('THIS_MONTH'),
+    spend7d:       getSpendRange(d7Str, yStr),
+    spend5d:       getSpendRange(d5Str, yStr),
+    spend3d:       getSpendRange(d3Str, yStr),
+    spendYesterday: getSpend('YESTERDAY'),
+    spendSinceTopUp: spendSinceTopUp,
+    campBudget:    campBudget,
+    activeCamps:   activeCamps,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 12. TELEGRAM — РАССЫЛКИ
+// ══════════════════════════════════════════════════════════════════
+function buildAndSendLeadReports(dateStr) {
+  var ss      = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet   = ss.getSheetByName(CONFIG.SHEETS.SETTINGS);
+  if (!sheet) return;
+
+  var dates   = Array.isArray(dateStr) ? dateStr : [dateStr];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  var clients = sheet.getRange(3, 1, Math.max(lastRow - 2, 1), 18).getValues();
+
+  var fbSheet = ss.getSheetByName(CONFIG.SHEETS.FACEBOOK);
+  var ggSheet = ss.getSheetByName(CONFIG.SHEETS.GOOGLE);
+  var ttSheet = ss.getSheetByName(CONFIG.SHEETS.TIKTOK);
+  var fbRaw = fbSheet ? fbSheet.getDataRange().getValues() : [];
+  var ggRaw = ggSheet ? ggSheet.getDataRange().getValues() : [];
+  var ttRaw = ttSheet ? ttSheet.getDataRange().getValues() : [];
+
+  function fmtD(d) { return (d instanceof Date) ? Utilities.formatDate(d, CONFIG.TIMEZONE, 'yyyy-MM-dd') : String(d).trim(); }
+  var fbData = fbRaw.filter(function(r) { return dates.indexOf(fmtD(r[0])) !== -1; });
+  var ggData = ggRaw.filter(function(r) { return dates.indexOf(fmtD(r[0])) !== -1; });
+  var ttData = ttRaw.filter(function(r) { return dates.indexOf(fmtD(r[0])) !== -1; });
+
+  var dateLabel = dates.length > 1 ? formatShortDate(dates[dates.length - 1]) + ' - ' + formatShortDate(dates[0]) : formatShortDate(dates[0]);
+
+  clients.forEach(function(row) {
+    var active     = row[CONFIG.COL.ACTIVE];
+    var clientId   = row[CONFIG.COL.CLIENT];
+    var reportName = row[CONFIG.COL.REPORT_NAME] || clientId;
+    var chatId     = row[CONFIG.COL.TG_CHAT_ID];
+    var topicId    = row[CONFIG.COL.TG_TOPIC_ID];
+    var citiesRaw  = row[CONFIG.COL.CITIES];
+    if (!active || !clientId || !chatId) return;
+
+    var cityList = parseCityList(citiesRaw);
+    var regions  = {};
+
+    fbData.filter(function(r) { return String(r[1]).trim() === clientId; }).forEach(function(r) {
+      var reg = getOrInitRegion(regions, detectRegName(r[2], cityList, reportName));
+      var cost    = parseFloat(String(r[6]).replace(',', '.')) || 0;
+      var resType = String(r[4]).toLowerCase();
+      var primary = parseFloat(String(r[5]).replace(',', '.')) || 0;
+      if (resType.indexOf('lead') !== -1 || resType.indexOf('messag') !== -1 || resType.indexOf('contact') !== -1 || resType.indexOf('custom') !== -1) {
+        reg.fb.l  += Math.max(primary, (Number(r[7])||0) + (Number(r[9])||0) + (Number(r[11])||0));
+        reg.fb.ls += cost;
+      } else {
+        reg.fb.t  += Math.max(primary, (Number(r[8])||0) + (Number(r[10])||0));
+        reg.fb.ts += cost;
+      }
+      reg.fb.s += cost;
+    });
+
+    ggData.filter(function(r) { return String(r[1]).trim() === clientId; }).forEach(function(r) {
+      var reg = getOrInitRegion(regions, detectRegName(r[2], cityList, reportName));
+      reg.gg.c += parseFloat(String(r[4]).replace(',', '.')) || 0;
+      reg.gg.s += parseFloat(String(r[5]).replace(',', '.')) || 0;
+      reg.gg.v += parseFloat(String(r[6]).replace(',', '.')) || 0;
+    });
+
+    ttData.filter(function(r) { return String(r[1]).trim() === clientId; }).forEach(function(r) {
+      var reg = getOrInitRegion(regions, detectRegName(r[2], cityList, reportName));
+      reg.tt.c += parseFloat(String(r[4]).replace(',', '.')) || 0;
+      reg.tt.s += parseFloat(String(r[5]).replace(',', '.')) || 0;
+      reg.tt.v += parseFloat(String(r[6]).replace(',', '.')) || 0;
+    });
+
+    var msg      = 'Ежедневный отчет по лидам\n<b>' + reportName + '</b>\n' + dateLabel + '\n';
+    var hasData  = false;
+
+    Object.keys(regions).sort(function(a, b) {
+      if (a === reportName) return -1;
+      if (b === reportName) return 1;
+      return 0;
+    }).forEach(function(rName) {
+      var reg = regions[rName], rMsg = '';
+      if (reg.fb.s > 0 || reg.fb.l > 0 || reg.fb.t > 0) {
+        rMsg += '\n<b>Instagram:</b>\n';
+        if (reg.fb.l > 0) rMsg += 'Количество лидов: ' + reg.fb.l + '\nЦена за лид: $ ' + (reg.fb.ls / reg.fb.l).toFixed(2) + '\n';
+        if (reg.fb.t > 0) rMsg += 'Посещения (трафик): ' + reg.fb.t + '\nЦена за посещение: $ ' + (reg.fb.ts / reg.fb.t).toFixed(2) + '\n';
+        rMsg += 'Расход: $ ' + reg.fb.s.toFixed(2) + '\n';
+      }
+      if (reg.gg.s > 0 || reg.gg.c > 0) {
+        rMsg += '\n<b>Google Ads:</b>\nКлики: ' + reg.gg.c + '\n';
+        if (reg.gg.c > 0) rMsg += 'CPC: $ ' + (reg.gg.s / reg.gg.c).toFixed(2) + '\n';
+        if (reg.gg.v > 0) rMsg += 'Конверсии: ' + reg.gg.v + '\nЦена конверсии: $ ' + (reg.gg.s / reg.gg.v).toFixed(2) + '\n';
+        rMsg += 'Расход: $ ' + reg.gg.s.toFixed(2) + '\n';
+      }
+      if (reg.tt && (reg.tt.s > 0 || reg.tt.v > 0)) {
+        rMsg += '\n<b>TikTok:</b>\n';
+        if (reg.tt.v > 0) rMsg += 'Конверсии: ' + reg.tt.v + '\nЦена за конверсию: $ ' + (reg.tt.s / reg.tt.v).toFixed(2) + '\n';
+        else if (reg.tt.c > 0) rMsg += 'Клики: ' + reg.tt.c + '\nCPC: $ ' + (reg.tt.s / reg.tt.c).toFixed(2) + '\n';
+        rMsg += 'Расход: $ ' + reg.tt.s.toFixed(2) + '\n';
+      }
+
+      if (rMsg !== '') {
+        hasData = true;
+        msg += (Object.keys(regions).length > 1 || rName !== reportName ? '\n<b>' + rName + '</b>' : '') + rMsg;
+      }
+    });
+
+    if (hasData) { sendToTelegram(chatId, topicId, msg); Utilities.sleep(300); }
+  });
+}
+
+function getOrInitRegion(regions, name) {
+  if (!regions[name]) regions[name] = { fb: {l:0, s:0, t:0, ls:0, ts:0}, gg: {c:0, s:0, v:0}, tt: {c:0, s:0, v:0} };
+  return regions[name];
+}
+
+function sendBillingReport() {
+  var ss            = SpreadsheetApp.getActiveSpreadsheet();
+  var settingsSheet = ss.getSheetByName(CONFIG.SHEETS.SETTINGS);
+  var billingSheet  = ss.getSheetByName('Биллинги_FB');
+
+  if (!billingSheet) { SpreadsheetApp.getUi().alert('Сначала выгрузи биллинги FB'); return; }
+
+  var billingData    = billingSheet.getDataRange().getValues();
+  var ggBillingSheet = ss.getSheetByName('Биллинги_Google');
+  var ggBillingData  = ggBillingSheet ? ggBillingSheet.getDataRange().getValues() : [];
+  var ttBillingSheet = ss.getSheetByName('Биллинги_TikTok');
+  var ttBillingData  = ttBillingSheet ? ttBillingSheet.getDataRange().getValues() : [];
+  var lastRow        = settingsSheet.getLastRow();
+  if (lastRow < 2) return;
+  var clients        = settingsSheet.getRange(3, 1, Math.max(lastRow - 2, 1), 18).getValues();
+  var sent           = 0;
+  var today          = Utilities.formatDate(new Date(), CONFIG.TIMEZONE, 'dd.MM.yy');
+
+  clients.forEach(function(row) {
+    var active     = row[CONFIG.COL.ACTIVE];
+    var clientId   = row[CONFIG.COL.CLIENT];
+    var reportName = row[CONFIG.COL.REPORT_NAME] || clientId;
+    var chatId     = row[CONFIG.COL.TG_CHAT_ID];
+    var topicId    = row[CONFIG.COL.TG_TOPIC_ID];
+    if (!active || !clientId || !chatId) return;
+
+    var bRow = null;
+    for (var i = 1; i < billingData.length; i++) {
+      if (String(billingData[i][0]).trim() === clientId) { bRow = billingData[i]; break; }
+    }
+    if (!bRow) return;
+
+    var debt      = bRow[3] || 0;
+    var threshold = bRow[4];
+    var till      = bRow[5];
+    var billDateRaw = bRow[6] || '—';
+    var budget    = bRow[7] || '—';
+    var status    = String(bRow[11] || '');
+
+    var billDate = '—';
+    if (billDateRaw && billDateRaw !== '—') {
+      var mo0 = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+      try {
+        var bd = new Date(billDateRaw);
+        if (!isNaN(bd.getTime())) billDate = bd.getDate() + ' ' + mo0[bd.getMonth()] + ' ' + bd.getFullYear();
+        else billDate = billDateRaw.toString();
+      } catch(e) { billDate = billDateRaw.toString(); }
+    }
+
+    var progressBar = '';
+    var debtNum     = parseFloat(String(debt).replace(',', '.')) || 0;
+    var threshNum   = parseFloat(String(threshold).replace(',', '.')) || 0;
+    if (threshNum > 0) {
+      var pct = Math.min(Math.round(debtNum / threshNum * 10), 10);
+      var bar = '';
+      for (var pi = 0; pi < 10; pi++) bar += (pi < pct ? '▓' : '░');
+      progressBar = '\n' + bar + ' ' + Math.round(debtNum / threshNum * 100) + '%';
+    }
+
+    var dateWarning = '';
+    if (billDate !== '—' && billDate !== '') {
+      var currentYear  = new Date().getFullYear();
+      var monthNames   = {'янв':0,'фев':1,'мар':2,'апр':3,'май':4,'июн':5,'июл':6,'авг':7,'сен':8,'окт':9,'ноя':10,'дек':11};
+      var parts        = billDate.toString().split(' ');
+      if (parts.length === 2 && monthNames[parts[1]] !== undefined) {
+        var billDateObj  = new Date(currentYear, monthNames[parts[1]], parseInt(parts[0]));
+        var daysLeft     = Math.round((billDateObj - new Date()) / (1000 * 60 * 60 * 24));
+        var mo = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+        var pd = billDateObj.getDate() + ' ' + mo[billDateObj.getMonth()] + ' ' + billDateObj.getFullYear();
+        if (daysLeft <= 3 && daysLeft >= 0) dateWarning = '\n⚠️ Списание через ' + daysLeft + ' дн. — ' + pd;
+        else if (daysLeft < 0)              dateWarning = '\n⚠️ Списание было ' + pd;
+        else                                dateWarning = '\nДата списания: ' + pd;
+      }
+    }
+
+    var threshWarning = '';
+    if (status.indexOf('🔴') !== -1) threshWarning = '\n🔴 <b>' + status + '</b>';
+    else if (status.indexOf('🟡') !== -1) threshWarning = '\n🟡 ' + status;
+
+    var aslLimit   = bRow[8]  || '';
+    var aslSpent   = bRow[9]  || '';
+    var aslRemains = bRow[10] || '';
+    var aslLine = '';
+    if (threshNum === 0 && aslLimit && aslLimit !== 'Без лимита' && aslLimit !== '') {
+      aslLine = '\nЛимит аккаунта: $' + aslLimit + (aslSpent ? '  /  Потрачено: $' + aslSpent : '') + (aslRemains ? '\nОстаток: <b>$' + aslRemains + '</b>' : '');
+    }
+
+    var budgetLine = (budget && budget !== '—') ? '\nРасход вчера / Бюджет: $' + budget : '';
+
+    var msg = '<b>Биллинги ' + today + '</b>\n'
+      + '<b>' + reportName + '</b>\n'
+      + '\n<b>FB Ads:</b>' + progressBar
+      + '\nДолг: <b>$' + debt + '</b>' + (threshNum > 0 ? '  /  Порог: $' + threshold : '')
+      + (till && till !== '—' ? '\nОстаток: <b>$' + till + '</b>' : '')
+      + aslLine + budgetLine
+      + (billDate !== '—' ? '\nСписание: ' + billDate : '')
+      + dateWarning + threshWarning;
+
+    if (ttBillingSheet) {
+      var ttBRow = null;
+      for (var ti = 1; ti < ttBillingData.length; ti++) {
+        if (String(ttBillingData[ti][0]).trim() === clientId) { ttBRow = ttBillingData[ti]; break; }
+      }
+      if (ttBRow) {
+        var ttBal2       = ttBRow[2] && ttBRow[2] !== '—' ? ttBRow[2] : null;
+        var ttBalDt2raw  = ttBRow[3];
+        var ttSpendY     = ttBRow[4] || '—';
+        var ttForecast   = ttBRow[7] && ttBRow[7] !== '—' ? ttBRow[7] : null;
+        var ttStatus2    = String(ttBRow[8] || '');
+
+        var ttBalDt2 = '';
+        if (ttBalDt2raw && ttBalDt2raw !== '—' && ttBalDt2raw !== '') {
+          var moTT = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+          try {
+            var dtTT = ttBalDt2raw instanceof Date ? ttBalDt2raw : new Date(ttBalDt2raw);
+            if (!isNaN(dtTT.getTime())) ttBalDt2 = dtTT.getDate() + ' ' + moTT[dtTT.getMonth()] + ' ' + dtTT.getFullYear();
+            else ttBalDt2 = String(ttBalDt2raw);
+          } catch(e) { ttBalDt2 = String(ttBalDt2raw); }
+        }
+
+        var ttStatusIcon = '';
+        if (ttStatus2 !== '✅ Активен' && ttStatus2 !== '') {
+          if   (ttStatus2.indexOf('🔴') !== -1) ttStatusIcon = '\n🔴 <b>' + ttStatus2 + '</b>';
+          else if (ttStatus2.indexOf('🟡') !== -1) ttStatusIcon = '\n' + ttStatus2;
+        }
+
+        msg += '\n\n<b>TikTok Ads:</b>'
+          + (ttBal2 ? '\nБаланс: <b>$' + ttBal2 + '</b>' + (ttBalDt2 ? ' (пополнено ' + ttBalDt2 + ')' : '') : '')
+          + (ttForecast ? '\nСписание: ' + ttForecast : '')
+          + '\nРасход вчера: $' + ttSpendY + ttStatusIcon;
+      }
+    }
+
+    if (ggBillingSheet) {
+      var ggRow = null;
+      for (var gi = 1; gi < ggBillingData.length; gi++) {
+        if (String(ggBillingData[gi][0]).trim() === clientId) { ggRow = ggBillingData[gi]; break; }
+      }
+      if (ggRow) {
+        var ggBal        = ggRow[3] && ggRow[3] !== '—' ? ggRow[3] : null;
+        var ggSpendYest  = ggRow[4] || '—';
+        var ggForecast2  = ggRow[8] && ggRow[8] !== '—' ? ggRow[8] : null;
+        var ggBudget     = ggRow[9] && ggRow[9] !== '—' ? ggRow[9] : null;
+        var ggStatus     = String(ggRow[11] || '');
+
+        var ggStatusIcon = '';
+        if (ggStatus !== '✅ Активен' && ggStatus !== '') {
+          if   (ggStatus.indexOf('🔴') !== -1) ggStatusIcon = '\n🔴 <b>' + ggStatus + '</b>';
+          else                                 ggStatusIcon = '\n' + ggStatus;
+        }
+
+        var ggBalDateRaw = row[CONFIG.COL.GOOGLE_BAL_DATE];
+        var ggBalDate = '';
+        if (ggBalDateRaw && ggBalDateRaw !== '') {
+          var mo2 = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+          try {
+            var gd = ggBalDateRaw instanceof Date ? ggBalDateRaw : new Date(ggBalDateRaw);
+            if (!isNaN(gd.getTime())) ggBalDate = gd.getDate() + ' ' + mo2[gd.getMonth()] + ' ' + gd.getFullYear();
+            else ggBalDate = String(ggBalDateRaw);
+          } catch(e) { ggBalDate = String(ggBalDateRaw); }
+        }
+        msg += '\n\n<b>Google Ads:</b>'
+          + (ggBal ? '\nБаланс: <b>$' + ggBal + '</b>' + (ggBalDate ? ' (пополнено ' + ggBalDate + ')' : '') : '')
+          + (ggForecast2 ? '\nСписание: ' + ggForecast2 : '')
+          + '\nРасход вчера: $' + ggSpendYest
+          + (ggBudget ? '\nДневной бюджет: $' + ggBudget : '')
+          + ggStatusIcon;
+      }
+    }
+
+    if (sendToTelegram(chatId, topicId, msg)) sent++;
+    Utilities.sleep(300);
+  });
+  SpreadsheetApp.getUi().alert('✅ Биллинг-отчёт отправлен: ' + sent + ' клиентов.');
+}
+
+function weekendReportRunner() {
+  var now = new Date(), days = [];
+  for (var i = 1; i <= 3; i++) {
+    var d = new Date(); d.setDate(now.getDate() - i);
+    days.push(Utilities.formatDate(d, CONFIG.TIMEZONE, 'yyyy-MM-dd'));
+  }
+  buildAndSendLeadReports(days);
+}
+
+function testSendTelegram() {
+  var yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  buildAndSendLeadReports(Utilities.formatDate(yesterday, CONFIG.TIMEZONE, 'yyyy-MM-dd'));
+}
+
+function setupBillingTrigger() {
+  var ui   = SpreadsheetApp.getUi();
+  var resp = ui.prompt('⚙️ Авто-триггер биллинга', 'Час отправки (0-23, например 9):', ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  var hour = parseInt(resp.getResponseText(), 10);
+  if (isNaN(hour) || hour < 0 || hour > 23) { ui.alert('Неверное время'); return; }
+
+  ScriptApp.getProjectTriggers().forEach(function(t) { if (t.getHandlerFunction() === 'dailyBillingRunner') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('dailyBillingRunner').timeBased().everyDays(1).atHour(hour).create();
+  ui.alert('✅ Биллинг будет отправляться каждый день в ' + hour + ':00');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 13. РЕТРОКОРРЕКТИРОВКА (ОПТИМИЗИРОВАННАЯ)
+// ══════════════════════════════════════════════════════════════════
+function retroSyncRunner() {
+  var ss            = SpreadsheetApp.getActiveSpreadsheet();
+  var settingsSheet = ss.getSheetByName(CONFIG.SHEETS.SETTINGS);
+  if (!settingsSheet) return;
+
+  var lastRow = settingsSheet.getLastRow();
+  if (lastRow < 2) return;
+  var clientData        = settingsSheet.getRange(3, 1, Math.max(lastRow - 2, 1), 18).getValues();
+  var googleAccessToken = getGoogleAccessToken();
+
+  var dates = [];
+  for (var i = 1; i <= 3; i++) {
+    var d = new Date(); d.setDate(d.getDate() - i);
+    dates.push(Utilities.formatDate(d, CONFIG.TIMEZONE, 'yyyy-MM-dd'));
+  }
+  var startDate = dates[dates.length - 1]; 
+  var endDate   = dates[0];                
+
+  Logger.log('RetroSync: ' + startDate + ' -> ' + endDate);
+
+  var fbSheet = ss.getSheetByName(CONFIG.SHEETS.FACEBOOK);
+  var ggSheet = ss.getSheetByName(CONFIG.SHEETS.GOOGLE);
+  var ttSheet = ss.getSheetByName(CONFIG.SHEETS.TIKTOK);
+
+  deleteRowsByDatesFast(fbSheet, dates);
+  deleteRowsByDatesFast(ggSheet, dates);
+  deleteRowsByDatesFast(ttSheet, dates);
+
+  clientData.forEach(function(row) {
+    var active   = row[CONFIG.COL.ACTIVE];
+    var client   = row[CONFIG.COL.CLIENT];
+    var fbId     = row[CONFIG.COL.FB_ID];
+    var googleId = row[CONFIG.COL.GOOGLE_ID];
+    var ttId     = row[CONFIG.COL.TIKTOK_ID];
+    if (!active || !client) return;
+
+    if (fbId) safeRun(function() { fetchFacebookData(fbSheet, client, fbId.toString(), startDate, endDate); }, 'FB:' + client);
+    if (googleId) {
+      var cId = googleId.toString().replace(/\D/g, '');
+      if (cId.length > 5) safeRun(function() { fetchGoogleData(ggSheet, client, cId, googleAccessToken, startDate, endDate); }, 'Google:' + client);
+    }
+    if (ttId) safeRun(function() { fetchTikTokData(ttSheet, client, ttId.toString(), startDate, endDate); }, 'TikTok:' + client);
+  });
+
+  sortSheetByDate(fbSheet);
+  sortSheetByDate(ggSheet);
+  sortSheetByDate(ttSheet);
+  Logger.log('RetroSync completed');
+}
+
+function deleteRowsByDatesFast(sheet, dates) {
+  if (!sheet) return;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var range = sheet.getDataRange();
+  var data = range.getValues();
+  var headers = data.shift(); 
+
+  var filteredData = data.filter(function(row) {
+    var dateStr = (row[0] instanceof Date)
+      ? Utilities.formatDate(row[0], CONFIG.TIMEZONE, 'yyyy-MM-dd')
+      : String(row[0]).trim();
+    return dates.indexOf(dateStr) === -1; 
+  });
+
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (filteredData.length > 0) {
+    sheet.getRange(2, 1, filteredData.length, filteredData[0].length).setValues(filteredData);
+  }
+}
+
+function setupAllTriggers() {
+  var ui   = SpreadsheetApp.getUi();
+  var resp = ui.prompt('⚙️ Настройка всех триггеров', 'Введи три времени через запятую:\n1. Выгрузка\n2. Ретро\n3. Биллинг\nПример: 8,10,9', ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+
+  var parts = resp.getResponseText().split(',').map(function(s) { return parseInt(s.trim(), 10); });
+  if (parts.length !== 3 || parts.some(function(h) { return isNaN(h) || h < 0 || h > 23; })) { ui.alert('Неверный формат'); return; }
+
+  var fnNames = ['dailySyncRunner', 'retroSyncRunner', 'dailyBillingRunner'];
+  ScriptApp.getProjectTriggers().forEach(function(t) { if (fnNames.indexOf(t.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(t); });
+  fnNames.forEach(function(fn, i) { ScriptApp.newTrigger(fn).timeBased().everyDays(1).atHour(parts[i]).create(); });
+
+  ui.alert('✅ Триггеры установлены!\n📅 Выгрузка: ' + parts[0] + ':00\n🔄 Ретро: ' + parts[1] + ':00\n💰 Биллинг: ' + parts[2] + ':00');
+}
+
+function sendToTelegram(chatId, topicId, text) {
+  var token   = CONFIG.TG.BOT_TOKEN();
+  if (!token || !chatId) return false;
+  var payload = { chat_id: chatId.toString(), text: text, parse_mode: 'HTML' };
+  if (topicId) payload.message_thread_id = topicId.toString();
+  try {
+    var res = JSON.parse(UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      method: 'post', contentType: 'application/json', payload: JSON.stringify(payload), muteHttpExceptions: true,
+    }).getContentText());
+    if (!res.ok) Logger.log('TG error: ' + JSON.stringify(res));
+    return res.ok;
+  } catch(e) { Logger.log('TG exception: ' + e.message); return false; }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 14. АУДИТ — ИНСТРУМЕНТЫ ДИАГНОСТИКИ МЕТОК
+// ══════════════════════════════════════════════════════════════════
+function debugFbActions() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var row = ss.getSheetByName(CONFIG.SHEETS.SETTINGS).getRange('B2:D2').getValues()[0];
+  var client = row[0], fbId = row[2];
+  if (!fbId) { SpreadsheetApp.getUi().alert('Нет FB ID в строке 2 (колонка D)'); return; }
+
+  var yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  var dateStr = Utilities.formatDate(yesterday, CONFIG.TIMEZONE, 'yyyy-MM-dd');
+  var rawData = fetchRawFbActions(fbId.toString(), dateStr, dateStr);
+  if (rawData.error) { SpreadsheetApp.getUi().alert('❌ ' + rawData.error); return; }
+
+  var sheet = getOrCreateSheet(ss, 'DEBUG_FB_Actions');
+  sheet.clearContents();
+  sheet.appendRow(['Клиент', 'Кампания', 'Spend', 'action_type', 'value', 'Статус']);
+  sheet.getRange(1, 1, 1, 6).setBackground('#1a472a').setFontColor('white').setFontWeight('bold');
+
+  rawData.forEach(function(item) {
+    (item.actions || []).forEach(function(a) {
+      var known = KNOWN_STANDARD_ACTIONS.indexOf(a.action_type) !== -1;
+      sheet.appendRow([client, item.campaign_name, item.spend, a.action_type, a.value, known ? '✅ стандарт' : '⚠️ КАСТОМНЫЙ']);
+    });
+  });
+  SpreadsheetApp.getUi().alert('✅ Готово! См. DEBUG_FB_Actions');
+}
+
+function auditAllClientsActions() {
+  var ss            = SpreadsheetApp.getActiveSpreadsheet();
+  var settingsSheet = ss.getSheetByName(CONFIG.SHEETS.SETTINGS);
+  var endDate       = new Date(); endDate.setDate(endDate.getDate() - 1);
+  var startDate     = new Date(); startDate.setDate(startDate.getDate() - 7);
+  var start         = Utilities.formatDate(startDate, CONFIG.TIMEZONE, 'yyyy-MM-dd');
+  var end           = Utilities.formatDate(endDate,   CONFIG.TIMEZONE, 'yyyy-MM-dd');
+
+  var lastRow = settingsSheet.getLastRow();
+  if (lastRow < 2) return;
+  var clients = settingsSheet.getRange(3, 1, Math.max(lastRow - 2, 1), 18).getValues();
+
+  var rawSheet     = getOrCreateSheet(ss, 'AUDIT_Raw');
+  var summarySheet = getOrCreateSheet(ss, 'AUDIT_Summary');
+  var knownSheet   = getOrCreateSheet(ss, 'AUDIT_KnownBase');
+  rawSheet.clearContents();     summarySheet.clearContents();     knownSheet.clearContents();
+  rawSheet.appendRow(['Клиент','Кампания','Spend','action_type','value','Статус']);
+  summarySheet.appendRow(['Клиент','Кастомные action_type','Кампании','Рекомендация']);
+  knownSheet.appendRow(['action_type','Категория','Клиенты']);
+  [rawSheet, summarySheet, knownSheet].forEach(function(s) { s.getRange(1,1,1,s.getLastColumn()).setBackground('#1a472a').setFontColor('white').setFontWeight('bold'); });
+
+  var allRaw = [], allSummary = [], knownMap = {};
+
+  clients.forEach(function(row) {
+    var active = row[CONFIG.COL.ACTIVE], client = row[CONFIG.COL.CLIENT], fbId = row[CONFIG.COL.FB_ID];
+    if (!active || !client || !fbId) return;
+    SpreadsheetApp.getActiveSpreadsheet().toast('Сканирую: ' + client, 'Аудит', 3);
+
+    var rawData = fetchRawFbActions(fbId.toString(), start, end);
+    if (rawData.error) { allRaw.push([client, '❌ ' + rawData.error, '', '', '', '']); return; }
+
+    var clientCustom = {};
+    rawData.forEach(function(item) {
+      (item.actions || []).forEach(function(a) {
+        var known  = KNOWN_STANDARD_ACTIONS.indexOf(a.action_type) !== -1;
+        allRaw.push([client, item.campaign_name, item.spend, a.action_type, a.value, known ? '✅ стандарт' : '⚠️ КАСТОМНЫЙ']);
+        if (!knownMap[a.action_type]) knownMap[a.action_type] = { cat: categorizeAction(a.action_type), clients: [] };
+        if (knownMap[a.action_type].clients.indexOf(client) === -1) knownMap[a.action_type].clients.push(client);
+        if (!known) {
+          if (!clientCustom[a.action_type]) clientCustom[a.action_type] = [];
+          if (clientCustom[a.action_type].indexOf(item.campaign_name) === -1) clientCustom[a.action_type].push(item.campaign_name);
+        }
+      });
+    });
+
+    Object.keys(clientCustom).forEach(function(at) { allSummary.push([client, at, clientCustom[at].join(' | '), recommendAction(at)]); });
+    if (Object.keys(clientCustom).length === 0) allSummary.push([client, '✅ Только стандартные метки', '—', '—']);
+  });
+
+  if (allRaw.length     > 0) batchAppend(rawSheet, allRaw);
+  if (allSummary.length > 0) batchAppend(summarySheet, allSummary);
+  var knownRows = [];
+  Object.keys(knownMap).sort().forEach(function(at) { knownRows.push([at, knownMap[at].cat, knownMap[at].clients.join(', ')]); });
+  if (knownRows.length > 0) batchAppend(knownSheet, knownRows);
+
+  var lastR = rawSheet.getLastRow();
+  if (lastR > 1) {
+    var auditVals = rawSheet.getRange(2, 6, lastR - 1, 1).getValues();
+    for (var r = 0; r < auditVals.length; r++) {
+      if (auditVals[r][0].toString().indexOf('КАСТОМНЫЙ') !== -1) rawSheet.getRange(r + 2, 1, 1, 6).setBackground('#fff3cd');
+    }
+  }
+  SpreadsheetApp.getUi().alert('✅ Аудит завершён!');
+}
+
+function onboardNewClient() {
+  var ui   = SpreadsheetApp.getUi();
+  var resp = ui.prompt('🆕 Онбординг', 'Номер строки клиента в Settings:', ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  var rowNum = parseInt(resp.getResponseText(), 10);
+  if (isNaN(rowNum) || rowNum < 2) { ui.alert('Неверный номер'); return; }
+
+  var ss     = SpreadsheetApp.getActiveSpreadsheet();
+  var row    = ss.getSheetByName(CONFIG.SHEETS.SETTINGS).getRange(rowNum, 1, 1, 18).getValues()[0];
+  var client = row[CONFIG.COL.CLIENT], fbId = row[CONFIG.COL.FB_ID];
+  if (!client || !fbId) { ui.alert('Нет клиента или FB ID'); return; }
+
+  ui.alert('Сканирую ' + client + ' за 14 дней...');
+  var endDate = new Date(); endDate.setDate(endDate.getDate() - 1);
+  var startDate = new Date(); startDate.setDate(startDate.getDate() - 14);
+  var rawData = fetchRawFbActions(fbId.toString(), Utilities.formatDate(startDate, CONFIG.TIMEZONE, 'yyyy-MM-dd'), Utilities.formatDate(endDate,   CONFIG.TIMEZONE, 'yyyy-MM-dd'));
+  if (rawData.error) { ui.alert('❌ ' + rawData.error); return; }
+
+  var found = {};
+  rawData.forEach(function(item) {
+    (item.actions || []).forEach(function(a) {
+      if (!found[a.action_type]) found[a.action_type] = { total: 0, camps: [] };
+      found[a.action_type].total += Number(a.value || 0);
+      if (found[a.action_type].camps.indexOf(item.campaign_name) === -1) found[a.action_type].camps.push(item.campaign_name);
+    });
+  });
+
+  var sheet = getOrCreateSheet(ss, 'ONBOARD_' + client.replace(/\s/g, '_'));
+  sheet.clearContents();
+  sheet.appendRow(['action_type','Сумма за 14д','Кампании','В базе?','Категория','Добавить в код?']);
+  sheet.getRange(1,1,1,6).setBackground('#1a472a').setFontColor('white').setFontWeight('bold');
+
+  var rows = [], hasNew = false;
+  Object.keys(found).sort().forEach(function(at) {
+    var inBase = KNOWN_STANDARD_ACTIONS.indexOf(at) !== -1;
+    var camps  = found[at].camps.slice(0, 3).join(' | ');
+    if (found[at].camps.length > 3) camps += ' (+' + (found[at].camps.length - 3) + ')';
+    rows.push([at, found[at].total, camps, inBase ? '✅ да' : '🆕 НОВЫЙ', categorizeAction(at), recommendAction(at)]);
+    if (!inBase && categorizeAction(at) !== 'Служебная') hasNew = true;
+  });
+  batchAppend(sheet, rows);
+
+  var lastR = sheet.getLastRow();
+  for (var r = 2; r <= lastR; r++) { if (sheet.getRange(r, 4).getValue() === '🆕 НОВЫЙ') sheet.getRange(r, 1, 1, 6).setBackground('#fff3cd'); }
+  sheet.autoResizeColumns(1, 6);
+  ui.alert('✅ Онбординг ' + client + ' готов!');
+}
+
+function fetchRawFbActions(adAccountId, start, end) {
+  var id    = adAccountId.indexOf('act_') === 0 ? adAccountId : 'act_' + adAccountId;
+  var token = CONFIG.FB.ACCESS_TOKEN();
+  var url   = 'https://graph.facebook.com/' + CONFIG.FB.API_VERSION + '/' + id + '/insights?fields=campaign_name,spend,actions,date_start&time_range=' + encodeURIComponent(JSON.stringify({ since: start, until: end })) + '&time_increment=all_days&level=campaign&limit=200&action_report_time=conversion&action_attribution_windows=' + encodeURIComponent('["7d_click","1d_view"]') + '&access_token=' + token;
+  try {
+    var res = JSON.parse(UrlFetchApp.fetch(url, { muteHttpExceptions: true }).getContentText());
+    if (res.error) return { error: res.error.message };
+    return res.data || [];
+  } catch(e) { return { error: e.message }; }
+}
+
+function categorizeAction(at) {
+  if (at.indexOf('messaging') !== -1)                             return 'Messaging';
+  if (at.indexOf('lead') !== -1)                                  return 'Лиды';
+  if (at.indexOf('contact') !== -1)                               return 'Контакты';
+  if (at.indexOf('landing_page') !== -1)                          return 'LPV';
+  if (at.indexOf('instagram_profile') !== -1)                     return 'IG профиль';
+  if (at.indexOf('link_click') !== -1 || at.indexOf('outbound') !== -1) return 'Клики';
+  if (at.indexOf('video') !== -1)                                 return 'Видео';
+  if (at.indexOf('post') !== -1)                                  return 'Вовлечённость';
+  if (at.indexOf('offsite_conversion.custom') !== -1)             return '🔴 Кастомная конверсия';
+  if (at.indexOf('offsite_conversion.fb_pixel') !== -1)           return 'Пиксель FB';
+  return 'Служебная';
+}
+
+function recommendAction(at) {
+  if (at.indexOf('offsite_conversion.custom') !== -1)  return '🔴 Добавить в FB_CUSTOM_CONVERSIONS';
+  if (at.indexOf('contact') !== -1)                    return '🟡 Добавить в FB_ACTIONS.WEBSITE_CONTACTS';
+  if (at.indexOf('lead') !== -1)                       return '🟡 Проверить — возможно дубль!';
+  if (at.indexOf('messaging') !== -1)                  return '🟡 Добавить в FB_ACTIONS.MESSAGING если нужно';
+  if (at.indexOf('video') !== -1 || at.indexOf('post') !== -1) return '✅ Служебная, в Results не нужна';
+  return '🔵 Добавить в KNOWN_STANDARD_ACTIONS если стандартная';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 15. УТИЛИТЫ
+// ══════════════════════════════════════════════════════════════════
+function writeStatus(sheet, row, col, result) { sheet.getRange(row, col).setValue(result.ok ? '✅ OK' : '❌ ' + result.error); }
+function safeRun(fn, label) {
+  try { fn(); return { ok: true }; }
+  catch(e) { Logger.log('safeRun ERROR: ' + (label ? '[' + label + '] ' : '') + e.message); return { ok: false, error: e.message }; }
+}
+function logError(logSheet, client, platform, error) { logSheet.appendRow([new Date(), client, platform, error]); }
+function resetSheet(ss, name, headers) {
+  var sheet = ss.getSheetByName(name) || ss.insertSheet(name);
+  sheet.clearContents(); prepareHeaders(sheet, headers); return sheet;
+}
+function getOrCreateSheet(ss, name) { return ss.getSheetByName(name) || ss.insertSheet(name); }
+function prepareHeaders(sheet, headers) {
+  sheet.appendRow(headers);
+  sheet.getRange(1, 1, 1, headers.length).setBackground('#1a472a').setFontWeight('bold').setFontColor('white');
+  sheet.setFrozenRows(1);
+}
+function batchAppend(sheet, rows) { if (rows && rows.length > 0) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows); }
+function processDates(start, end, useToday) {
+  var fmt = function(d) { return Utilities.formatDate(new Date(d), CONFIG.TIMEZONE, 'yyyy-MM-dd'); };
+  var endDate = useToday ? new Date() : end;
+  if (!start || isNaN(new Date(start))) return null;
+  if (!endDate || isNaN(new Date(endDate))) return null;
+  return { start: fmt(start), end: fmt(endDate) };
+}
+function getGoogleAccessToken() {
+  var res = JSON.parse(UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+    method: 'post', payload: { client_id: CONFIG.GOOGLE.CLIENT_ID(), client_secret: CONFIG.GOOGLE.CLIENT_SECRET(), refresh_token: CONFIG.GOOGLE.REFRESH_TOKEN(), grant_type: 'refresh_token' }, muteHttpExceptions: true,
+  }).getContentText());
+  if (!res.access_token) throw new Error('Google Auth failed: ' + JSON.stringify(res));
+  return res.access_token;
+}
+function toInt(val)   { return parseInt(val || 0, 10) || 0; }
+function toFloat(val) { return parseFloat(val || 0) || 0; }
+function toMoney(val) { return Math.round(parseFloat(val || 0) * 100) / 100; }
+function sortSheetByDate(sheet) {
+  if (!sheet) return;
+  var lr = sheet.getLastRow();
+  if (lr > 1) sheet.getRange(2, 1, lr - 1, sheet.getLastColumn()).sort([{column:1,ascending:true},{column:2,ascending:true}]);
+}
+function detectRegName(camp, cityList, def) {
+  var c = (camp || '').toLowerCase();
+  for (var i = 0; i < cityList.length; i++) {
+    var entry = cityList[i].trim();
+    if (!entry) continue;
+    var aliases = entry.split('|').map(function(s) { return s.trim().toLowerCase(); });
+    for (var j = 0; j < aliases.length; j++) {
+      if (aliases[j] && c.indexOf(aliases[j]) !== -1) { var name = aliases[0]; return name.charAt(0).toUpperCase() + name.slice(1); }
+    }
+  }
+  return def;
+}
+function parseCityList(citiesRaw) {
+  if (!citiesRaw) return [];
+  var str = String(citiesRaw);
+  if (str.indexOf(';') !== -1) return str.split(';').map(function(s) { return s.trim(); }).filter(Boolean);
+  return str.toLowerCase().split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+}
+function formatShortDate(dateStr) { var p = String(dateStr).split('-'); return p[2] + '.' + p[1] + '.' + p[0].slice(-2); }

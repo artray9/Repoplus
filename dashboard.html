@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Repoplus — Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0F172A;
+      --sidebar: #0B1120;
+      --card: #1E293B;
+      --card2: #162032;
+      --border: rgba(255,255,255,0.07);
+      --accent: #6C63FF;
+      --accent-glow: rgba(108,99,255,0.2);
+      --text: #F1F5F9;
+      --sub: #94A3B8;
+      --muted: #475569;
+      --green: #4ade80;
+      --red: #f87171;
+      --fb: #4267B2;
+      --gg: #EA4335;
+      --tt: #555;
+      --amo: #00baff;
+      --sidebar-w: 240px;
+    }
+    html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
+
+    /* LAYOUT */
+    .app { display: flex; height: 100vh; }
+
+    /* SIDEBAR */
+    .sidebar {
+      width: var(--sidebar-w); flex-shrink: 0;
+      background: var(--sidebar); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 0;
+      overflow-y: auto;
+    }
+    .sidebar-logo {
+      padding: 22px 24px 18px;
+      font-size: 20px; font-weight: 800; letter-spacing: -0.5px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-logo span { color: var(--accent); }
+    .sidebar-section { padding: 20px 12px 8px; }
+    .sidebar-section-label { font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; padding: 0 10px; margin-bottom: 6px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px; border-radius: 8px;
+      font-size: 14px; font-weight: 500; color: var(--sub);
+      cursor: pointer; transition: all .15s; text-decoration: none; margin-bottom: 2px;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+    .nav-item.active { background: var(--accent-glow); color: var(--text); }
+    .nav-item .nav-icon { width: 18px; text-align: center; font-size: 15px; }
+    .sidebar-divider { height: 1px; background: var(--border); margin: 8px 12px; }
+    .sidebar-clients { padding: 8px 12px; flex: 1; }
+    .client-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 8px;
+      font-size: 13px; color: var(--sub); cursor: pointer; transition: all .15s;
+    }
+    .client-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .client-item.active { background: var(--accent-glow); color: var(--text); }
+    .client-avatar {
+      width: 26px; height: 26px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; flex-shrink: 0;
+    }
+    .sidebar-bottom {
+      padding: 16px 12px;
+      border-top: 1px solid var(--border);
+    }
+    .user-chip { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; }
+    .user-avatar { width: 32px; height: 32px; border-radius: 8px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+    .user-name { font-size: 13px; font-weight: 600; }
+    .user-role { font-size: 11px; color: var(--sub); }
+
+    /* MAIN */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* TOPBAR */
+    .topbar {
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      padding: 16px 28px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15,23,42,0.9);
+      flex-shrink: 0;
+    }
+    .topbar-title { font-size: 18px; font-weight: 700; flex: 1; white-space: nowrap; }
+    .filter-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    select, input[type=date] {
+      background: var(--card); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 12px; border-radius: 8px; font-size: 13px; font-family: inherit;
+      cursor: pointer; outline: none; transition: border-color .2s;
+    }
+    select:focus, input[type=date]:focus { border-color: var(--accent); }
+    .source-tabs { display: flex; gap: 4px; }
+    .source-tab {
+      padding: 7px 14px; border-radius: 7px; font-size: 13px; font-weight: 500;
+      border: 1px solid var(--border); color: var(--sub); cursor: pointer; transition: all .15s;
+    }
+    .source-tab:hover { border-color: rgba(255,255,255,0.15); color: var(--text); }
+    .source-tab.active { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+    .btn-sync {
+      padding: 8px 16px; border-radius: 8px; background: var(--accent);
+      color: #fff; font-size: 13px; font-weight: 600; border: none; cursor: pointer;
+      display: flex; align-items: center; gap: 6px; transition: opacity .2s;
+    }
+    .btn-sync:hover { opacity: 0.85; }
+    .btn-sync.loading { opacity: 0.6; cursor: default; }
+
+    /* SCROLL AREA */
+    .content { flex: 1; overflow-y: auto; padding: 24px 28px; }
+
+    /* KPI GRID */
+    .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 22px; }
+    .kpi-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 18px 20px; position: relative; overflow: hidden; transition: border-color .2s;
+    }
+    .kpi-card:hover { border-color: rgba(108,99,255,0.3); }
+    .kpi-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: var(--kpi-color, var(--accent));
+    }
+    .kpi-label { font-size: 11px; color: var(--sub); text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px; }
+    .kpi-val { font-size: 26px; font-weight: 800; letter-spacing: -1px; margin: 10px 0 6px; }
+    .kpi-delta { font-size: 12px; font-weight: 500; }
+    .kpi-delta.up { color: var(--green); }
+    .kpi-delta.down { color: var(--red); }
+    .kpi-delta.neutral { color: var(--sub); }
+    .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* CHARTS ROW */
+    .charts-row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 20px; }
+    .chart-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px;
+    }
+    .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .chart-title { font-size: 14px; font-weight: 700; }
+    .chart-legend { display: flex; gap: 14px; }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sub); }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .chart-wrap { position: relative; height: 200px; }
+
+    /* SECOND ROW */
+    .second-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+
+    /* CAMPAIGN TABLE */
+    .table-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+    }
+    .table-header-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 22px; border-bottom: 1px solid var(--border);
+    }
+    .table-title { font-size: 14px; font-weight: 700; }
+    .table-actions { display: flex; gap: 10px; }
+    .search-box {
+      background: var(--card2); border: 1px solid var(--border); border-radius: 7px;
+      padding: 6px 12px; font-size: 13px; color: var(--text); width: 200px; font-family: inherit;
+      outline: none;
+    }
+    .search-box:focus { border-color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { border-bottom: 1px solid var(--border); }
+    th {
+      padding: 10px 16px; text-align: left; font-size: 11px; font-weight: 600;
+      color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer;
+      user-select: none; white-space: nowrap;
+    }
+    th:hover { color: var(--sub); }
+    td { padding: 11px 16px; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    tr:last-child td { border-bottom: none; }
+    tbody tr { transition: background .1s; cursor: pointer; }
+    tbody tr:hover { background: rgba(255,255,255,0.03); }
+    .source-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 5px; font-size: 11px; font-weight: 600;
+    }
+    .source-badge.fb { background: rgba(66,103,178,0.15); color: #7BA4F4; }
+    .source-badge.gg { background: rgba(234,67,53,0.15); color: #F4957B; }
+    .source-badge.tt { background: rgba(85,85,85,0.2); color: #aaa; }
+    .source-badge.amo { background: rgba(0,186,255,0.12); color: var(--amo); }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .up-val { color: var(--green); font-weight: 600; }
+    .down-val { color: var(--red); font-weight: 600; }
+    .camp-name { font-weight: 500; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ALERTS WIDGET */
+    .alerts-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px;
+    }
+    .alerts-title { font-size: 14px; font-weight: 700; margin-bottom: 14px; }
+    .alert-item {
+      display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .alert-item:last-child { border-bottom: none; padding-bottom: 0; }
+    .alert-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+    .alert-body { }
+    .alert-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+    .alert-desc { font-size: 12px; color: var(--sub); }
+    .alert-time { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+    /* TOAST */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 1000;
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px 20px; display: flex; align-items: center; gap: 10px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4); font-size: 14px;
+      transform: translateY(80px); opacity: 0; transition: all .3s;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+
+    /* SCROLLBAR */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 10px; }
+
+    @media (max-width: 1100px) {
+      .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+      .charts-row { grid-template-columns: 1fr; }
+      .second-row { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">repo<span>plus</span></div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Навигация</div>
+      <div class="nav-item active" onclick="setPage('dashboard')">
+        <span class="nav-icon">📊</span> Дашборд
+      </div>
+      <div class="nav-item" onclick="setPage('clients')">
+        <span class="nav-icon">👥</span> Клиенты
+      </div>
+      <div class="nav-item" onclick="setPage('reports')">
+        <span class="nav-icon">📋</span> Отчёты
+      </div>
+      <div class="nav-item" onclick="setPage('alerts')">
+        <span class="nav-icon">🔔</span> Алерты
+        <span style="margin-left:auto;background:#f87171;color:#fff;font-size:10px;padding:1px 7px;border-radius:100px;font-weight:700">3</span>
+      </div>
+    </div>
+
+    <div class="sidebar-divider"></div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Клиенты</div>
+    </div>
+    <div class="sidebar-clients" id="clientList"></div>
+
+    <div class="sidebar-divider"></div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Интеграции</div>
+      <div class="nav-item" onclick="setPage('integrations')">
+        <span class="nav-icon">🔌</span> Подключить
+      </div>
+      <div class="nav-item" onclick="window.location.href='index.html'">
+        <span class="nav-icon">🏠</span> Лендинг
+      </div>
+    </div>
+
+    <div class="sidebar-bottom">
+      <div class="user-chip">
+        <div class="user-avatar">K</div>
+        <div>
+          <div class="user-name">Dr. Kapanov</div>
+          <div class="user-role">Administrator</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main">
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div class="topbar-title" id="topTitle">Аналитика</div>
+      <div class="filter-group">
+        <select id="clientSelect" onchange="applyFilters()">
+          <option value="all">Все клиенты</option>
+        </select>
+        <input type="date" id="dateFrom" onchange="applyFilters()"/>
+        <span style="color:var(--muted);font-size:13px">—</span>
+        <input type="date" id="dateTo" onchange="applyFilters()"/>
+      </div>
+      <div class="source-tabs" id="sourceTabs">
+        <div class="source-tab active" onclick="setSource('all',this)">Все</div>
+        <div class="source-tab" onclick="setSource('facebook',this)">📘 FB</div>
+        <div class="source-tab" onclick="setSource('google',this)">🎯 Google</div>
+        <div class="source-tab" onclick="setSource('tiktok',this)">🎵 TikTok</div>
+        <div class="source-tab" onclick="setSource('amocrm',this)">📋 amoCRM</div>
+      </div>
+      <button class="btn-sync" id="syncBtn" onclick="syncData()">
+        <span id="syncIcon">🔄</span> Синхронизировать
+      </button>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="content" id="mainContent">
+      <!-- KPI CARDS -->
+      <div class="kpi-grid" id="kpiGrid"></div>
+
+      <!-- CHARTS ROW -->
+      <div class="charts-row">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div class="chart-title">Расход по дням ($)</div>
+            <div class="chart-legend">
+              <div class="legend-item"><div class="legend-dot" style="background:#6C63FF"></div>Facebook</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#EA4335"></div>Google</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#888"></div>TikTok</div>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="spendChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <div class="chart-title">CPL динамика ($)</div>
+          </div>
+          <div class="chart-wrap"><canvas id="cplChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- SECOND ROW -->
+      <div class="second-row">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div class="chart-title">CTR по источникам (%)</div>
+          </div>
+          <div class="chart-wrap"><canvas id="ctrChart"></canvas></div>
+        </div>
+        <div class="alerts-card">
+          <div class="alerts-title">🚨 Активные алерты</div>
+          <div id="alertsList"></div>
+        </div>
+      </div>
+
+      <!-- CAMPAIGN TABLE -->
+      <div class="table-card">
+        <div class="table-header-bar">
+          <div class="table-title">Кампании</div>
+          <div class="table-actions">
+            <input class="search-box" placeholder="🔍 Поиск кампании..." id="campSearch" oninput="filterTable()"/>
+            <select id="sortSelect" onchange="sortTable()" style="width:auto">
+              <option value="spend">По расходу</option>
+              <option value="leads">По лидам</option>
+              <option value="cpl">По CPL</option>
+              <option value="ctr">По CTR</option>
+            </select>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table id="campTable">
+            <thead>
+              <tr>
+                <th onclick="sortBy('source')">Источник</th>
+                <th onclick="sortBy('name')">Кампания</th>
+                <th onclick="sortBy('spend')">Расход $</th>
+                <th onclick="sortBy('impressions')">Показы</th>
+                <th onclick="sortBy('clicks')">Клики</th>
+                <th onclick="sortBy('leads')">Лиды/Конв</th>
+                <th onclick="sortBy('cpl')">CPL $</th>
+                <th onclick="sortBy('ctr')">CTR %</th>
+                <th onclick="sortBy('cpm')">CPM $</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody id="campBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast">
+  <span id="toastIcon">✅</span>
+  <span id="toastMsg">Данные синхронизированы</span>
+</div>
+
+<script>
+// ── MOCK DATA ──────────────────────────────────────────────────────
+const CLIENTS = [
+  { id: 'ogee',     name: 'OGEE Beauty',    color: '#FF6584', emoji: '💄' },
+  { id: 'medtour',  name: 'MedTour KZ',     color: '#4ade80', emoji: '🏥' },
+  { id: 'astana',   name: 'Astana Motors',  color: '#fbbf24', emoji: '🚗' },
+  { id: 'remax',    name: 'RE/MAX Elite',   color: '#60a5fa', emoji: '🏠' },
+  { id: 'fitclub',  name: 'FitClub',        color: '#a78bfa', emoji: '💪' },
+];
+
+const CAMPAIGNS = [
+  { source:'facebook', name:'OGEE — Лиды | Алматы | Женщины 25-44', client:'ogee',    spend:3420, imp:182000, clicks:4100, leads:89, cpl:38.4, ctr:2.25, cpm:18.8, active:true },
+  { source:'facebook', name:'OGEE — Мессенджер | Ретаргет',          client:'ogee',    spend:890,  imp:41000,  clicks:1240, leads:31, cpl:28.7, ctr:3.02, cpm:21.7, active:true },
+  { source:'google',   name:'MedTour — Поиск | Лечение за рубежом',  client:'medtour', spend:2100, imp:38000,  clicks:1890, leads:54, cpl:38.9, ctr:4.97, cpm:55.3, active:true },
+  { source:'google',   name:'Astana Motors — Авто кредит',           client:'astana',  spend:1750, imp:55000,  clicks:2200, leads:38, cpl:46.1, ctr:4.00, cpm:31.8, active:true },
+  { source:'tiktok',   name:'OGEE — Видео | Beauty routine',          client:'ogee',    spend:680,  imp:210000, clicks:3800, leads:22, cpl:30.9, ctr:1.81, cpm:3.24,  active:true },
+  { source:'facebook', name:'RE/MAX — Лиды | Квартиры Алматы',       client:'remax',   spend:1540, imp:78000,  clicks:1960, leads:42, cpl:36.7, ctr:2.51, cpm:19.7, active:true },
+  { source:'facebook', name:'FitClub — Абонемент | Лето 2025',       client:'fitclub', spend:430,  imp:33000,  clicks:820,  leads:18, cpl:23.9, ctr:2.48, cpm:13.0, active:false },
+  { source:'google',   name:'MedTour — Дисплей | Ретаргет',          client:'medtour', spend:560,  imp:95000,  clicks:680,  leads:9,  cpl:62.2, ctr:0.72, cpm:5.89,  active:true },
+  { source:'tiktok',   name:'Astana Motors — TopView тест-драйв',    client:'astana',  spend:950,  imp:340000, clicks:5600, leads:28, cpl:33.9, ctr:1.65, cpm:2.79,  active:true },
+  { source:'amocrm',   name:'RE/MAX — Воронка: квартиры',            client:'remax',   spend:0,    imp:0,      clicks:0,    leads:67, cpl:0,    ctr:0,    cpm:0,     active:true },
+];
+
+const DAYS = ['28 апр','29 апр','30 апр','1 май','2 май','3 май','4 май'];
+const SPEND_FB = [1820, 2140, 1950, 2480, 2890, 2320, 1980];
+const SPEND_GG = [980,  1100, 1240, 1380, 1490, 1210, 1040];
+const SPEND_TT = [320,  440,  390,  520,  610,  480,  380];
+const CPL_DATA = [42.1, 39.8, 40.5, 37.2, 35.8, 36.4, 37.0];
+const CTR_FB   = [2.41, 2.18, 2.35, 2.52, 2.29, 2.48, 2.25];
+const CTR_GG   = [4.81, 4.95, 5.12, 4.78, 5.03, 4.87, 4.97];
+const CTR_TT   = [1.72, 1.85, 1.68, 1.91, 1.77, 1.82, 1.81];
+
+const ALERTS_DATA = [
+  { icon:'⚠️', name:'OGEE Beauty — CPL вырос на 58%', desc:'Вчера: $61.2 vs среднее $38.4. Проверьте аудитории.', time:'Сегодня, 09:32' },
+  { icon:'📉', name:'FitClub — Падение CTR на 34%', desc:'CTR вчера 1.62% vs среднее 2.45%. Выгорание.', time:'Сегодня, 09:35' },
+  { icon:'⛔', name:'FitClub — Кампания остановлена', desc:'Facebook Ads: $0 вчера при $430 позавчера.', time:'Сегодня, 09:36' },
+];
+
+// ── STATE ─────────────────────────────────────────────────────────
+let activeSource = 'all';
+let activeClient = 'all';
+let sortField = 'spend';
+let sortDir = -1;
+let spendChart, cplChart, ctrChart;
+
+// ── INIT ──────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  // Set default dates
+  const today = new Date();
+  const from  = new Date(); from.setDate(today.getDate() - 7);
+  document.getElementById('dateFrom').value = from.toISOString().slice(0,10);
+  document.getElementById('dateTo').value   = today.toISOString().slice(0,10);
+
+  // Build client list in sidebar
+  const clientList = document.getElementById('clientList');
+  CLIENTS.forEach(c => {
+    const el = document.createElement('div');
+    el.className = 'client-item';
+    el.innerHTML = `<div class="client-avatar" style="background:${c.color}22;color:${c.color}">${c.emoji}</div>${c.name}`;
+    el.onclick = () => selectClient(c.id, el);
+    clientList.appendChild(el);
+    // also add to select
+    const opt = document.createElement('option');
+    opt.value = c.id; opt.textContent = c.name;
+    document.getElementById('clientSelect').appendChild(opt);
+  });
+
+  renderAll();
+});
+
+function renderAll() {
+  renderKPI();
+  renderCharts();
+  renderAlerts();
+  renderTable();
+}
+
+// ── KPI ───────────────────────────────────────────────────────────
+const KPI_DEFS = [
+  { key:'spend',   label:'💰 Расход',   fmt: v => '$'+v.toLocaleString('ru'), color:'#6C63FF', deltaKey:'+8.4%', deltaUp:true,  sub:'за выбранный период' },
+  { key:'leads',   label:'🎯 Лиды',     fmt: v => v.toLocaleString('ru'),    color:'#4ade80', deltaKey:'+22%',  deltaUp:true,  sub:'лиды + конверсии' },
+  { key:'cpl',     label:'💡 CPL',      fmt: v => '$'+v.toFixed(2),          color:'#fbbf24', deltaKey:'−11%',  deltaUp:true,  sub:'стоимость лида' },
+  { key:'ctr',     label:'📈 CTR',      fmt: v => v.toFixed(2)+'%',          color:'#60a5fa', deltaKey:'−0.3%', deltaUp:false, sub:'средний по источникам' },
+  { key:'cpm',     label:'📣 CPM',      fmt: v => '$'+v.toFixed(2),          color:'#a78bfa', deltaKey:'−4.1%', deltaUp:true,  sub:'стоимость 1000 показов' },
+];
+
+function getFilteredCamps() {
+  return CAMPAIGNS.filter(c => {
+    if (activeClient !== 'all' && c.client !== activeClient) return false;
+    if (activeSource !== 'all' && c.source !== activeSource) return false;
+    return true;
+  });
+}
+
+function renderKPI() {
+  const camps = getFilteredCamps();
+  const totals = {
+    spend: camps.reduce((s,c) => s + c.spend, 0),
+    leads: camps.reduce((s,c) => s + c.leads, 0),
+    cpl:   0, ctr: 0, cpm: 0,
+  };
+  const withLeads = camps.filter(c => c.leads > 0);
+  const withCtr   = camps.filter(c => c.ctr > 0);
+  totals.cpl = withLeads.length ? totals.spend / totals.leads : 0;
+  totals.ctr = withCtr.length   ? withCtr.reduce((s,c) => s+c.ctr, 0) / withCtr.length : 0;
+  const withCpm = camps.filter(c => c.cpm > 0);
+  totals.cpm = withCpm.length   ? withCpm.reduce((s,c) => s+c.cpm, 0) / withCpm.length : 0;
+
+  const grid = document.getElementById('kpiGrid');
+  grid.innerHTML = KPI_DEFS.map(k => `
+    <div class="kpi-card" style="--kpi-color:${k.color}">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-val">${k.fmt(totals[k.key])}</div>
+      <div class="kpi-delta ${k.deltaUp ? 'up' : 'down'}">${k.deltaKey} vs прошлая неделя</div>
+      <div class="kpi-sub">${k.sub}</div>
+    </div>
+  `).join('');
+}
+
+// ── CHARTS ────────────────────────────────────────────────────────
+const chartDefaults = {
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748B', font: { size: 11 } } },
+    y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748B', font: { size: 11 } } },
+  },
+  animation: { duration: 400 },
+  responsive: true, maintainAspectRatio: false,
+};
+
+function renderCharts() {
+  if (spendChart) spendChart.destroy();
+  if (cplChart)   cplChart.destroy();
+  if (ctrChart)   ctrChart.destroy();
+
+  // Spend chart
+  spendChart = new Chart(document.getElementById('spendChart'), {
+    type: 'bar',
+    data: {
+      labels: DAYS,
+      datasets: [
+        { label:'Facebook', data: SPEND_FB, backgroundColor:'rgba(108,99,255,0.7)', borderRadius:4, stack:'s' },
+        { label:'Google',   data: SPEND_GG, backgroundColor:'rgba(234,67,53,0.7)',  borderRadius:4, stack:'s' },
+        { label:'TikTok',   data: SPEND_TT, backgroundColor:'rgba(136,136,136,0.6)',borderRadius:4, stack:'s' },
+      ]
+    },
+    options: { ...chartDefaults, plugins: { legend: { display: false } } },
+  });
+
+  // CPL chart
+  cplChart = new Chart(document.getElementById('cplChart'), {
+    type: 'line',
+    data: {
+      labels: DAYS,
+      datasets: [{
+        data: CPL_DATA,
+        borderColor: '#fbbf24',
+        backgroundColor: 'rgba(251,191,36,0.08)',
+        tension: 0.4, fill: true, borderWidth: 2, pointRadius: 4, pointBackgroundColor:'#fbbf24',
+      }]
+    },
+    options: { ...chartDefaults },
+  });
+
+  // CTR chart
+  ctrChart = new Chart(document.getElementById('ctrChart'), {
+    type: 'line',
+    data: {
+      labels: DAYS,
+      datasets: [
+        { label:'FB', data:CTR_FB, borderColor:'#6C63FF', backgroundColor:'rgba(108,99,255,0.06)', tension:0.4, fill:true, borderWidth:2, pointRadius:3 },
+        { label:'GG', data:CTR_GG, borderColor:'#EA4335', backgroundColor:'rgba(234,67,53,0.06)',  tension:0.4, fill:true, borderWidth:2, pointRadius:3 },
+        { label:'TT', data:CTR_TT, borderColor:'#888',    backgroundColor:'rgba(136,136,136,0.05)',tension:0.4, fill:true, borderWidth:2, pointRadius:3 },
+      ]
+    },
+    options: { ...chartDefaults, plugins: { legend: { display: true, labels: { color:'#64748B', boxWidth:10, font:{size:11} } } } },
+  });
+}
+
+// ── ALERTS ────────────────────────────────────────────────────────
+function renderAlerts() {
+  document.getElementById('alertsList').innerHTML = ALERTS_DATA.map(a => `
+    <div class="alert-item">
+      <div class="alert-icon">${a.icon}</div>
+      <div class="alert-body">
+        <div class="alert-name">${a.name}</div>
+        <div class="alert-desc">${a.desc}</div>
+        <div class="alert-time">${a.time}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── TABLE ─────────────────────────────────────────────────────────
+function renderTable() {
+  let camps = getFilteredCamps();
+  const q = (document.getElementById('campSearch')?.value || '').toLowerCase();
+  if (q) camps = camps.filter(c => c.name.toLowerCase().includes(q));
+  camps.sort((a,b) => (b[sortField] - a[sortField]) * sortDir);
+
+  document.getElementById('campBody').innerHTML = camps.map(c => {
+    const srcBadge = {
+      facebook: '<span class="source-badge fb">📘 Facebook</span>',
+      google:   '<span class="source-badge gg">🎯 Google</span>',
+      tiktok:   '<span class="source-badge tt">🎵 TikTok</span>',
+      amocrm:   '<span class="source-badge amo">📋 amoCRM</span>',
+    }[c.source];
+    const statusDot = `<span class="status-dot" style="background:${c.active ? '#4ade80' : '#f87171'}"></span>${c.active ? 'Активна' : 'Остановлена'}`;
+    return `<tr>
+      <td>${srcBadge}</td>
+      <td><div class="camp-name" title="${c.name}">${c.name}</div></td>
+      <td><b>$${c.spend.toLocaleString('ru')}</b></td>
+      <td>${c.imp.toLocaleString('ru')}</td>
+      <td>${c.clicks.toLocaleString('ru')}</td>
+      <td><b>${c.leads}</b></td>
+      <td class="${c.cpl > 45 ? 'down-val' : c.cpl > 0 ? 'up-val' : ''}">${c.cpl > 0 ? '$'+c.cpl.toFixed(2) : '—'}</td>
+      <td>${c.ctr > 0 ? c.ctr.toFixed(2)+'%' : '—'}</td>
+      <td>${c.cpm > 0 ? '$'+c.cpm.toFixed(2) : '—'}</td>
+      <td style="font-size:12px;color:var(--sub)">${statusDot}</td>
+    </tr>`;
+  }).join('');
+}
+
+function filterTable() { renderTable(); }
+function sortBy(field) { sortField = field; sortDir *= -1; renderTable(); }
+function sortTable() { sortField = document.getElementById('sortSelect').value; sortDir = -1; renderTable(); }
+
+// ── CONTROLS ──────────────────────────────────────────────────────
+function setSource(src, el) {
+  activeSource = src;
+  document.querySelectorAll('.source-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderKPI();
+  renderTable();
+}
+
+function selectClient(id, el) {
+  activeClient = id;
+  document.querySelectorAll('.client-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('clientSelect').value = id;
+  applyFilters();
+}
+
+function applyFilters() {
+  activeClient = document.getElementById('clientSelect').value;
+  document.querySelectorAll('.client-item').forEach(i => i.classList.remove('active'));
+  if (activeClient !== 'all') {
+    const items = document.querySelectorAll('.client-item');
+    const idx = CLIENTS.findIndex(c => c.id === activeClient);
+    if (idx >= 0) items[idx].classList.add('active');
+  }
+  const name = activeClient === 'all' ? 'Все клиенты' : (CLIENTS.find(c => c.id === activeClient)?.name || '');
+  document.getElementById('topTitle').textContent = name ? `Аналитика — ${name}` : 'Аналитика';
+  renderKPI();
+  renderTable();
+}
+
+function syncData() {
+  const btn = document.getElementById('syncBtn');
+  const icon = document.getElementById('syncIcon');
+  btn.classList.add('loading');
+  btn.disabled = true;
+  let angle = 0;
+  const spin = setInterval(() => {
+    icon.style.transform = `rotate(${angle}deg)`;
+    angle += 30;
+  }, 50);
+  setTimeout(() => {
+    clearInterval(spin);
+    icon.style.transform = '';
+    btn.classList.remove('loading');
+    btn.disabled = false;
+    showToast('✅', 'Данные синхронизированы успешно');
+  }, 2200);
+}
+
+function setPage(page) {
+  const pages = {
+    clients: 'Управление клиентами',
+    reports: 'Отчёты',
+    alerts: 'Алерты и уведомления',
+    integrations: 'Интеграции',
+    dashboard: 'Аналитика',
+  };
+  document.getElementById('topTitle').textContent = pages[page] || 'Дашборд';
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  if (page !== 'dashboard') {
+    showToast('🚧', `Раздел "${pages[page]}" — в разработке`);
+  }
+}
+
+function showToast(icon, msg) {
+  document.getElementById('toastIcon').textContent = icon;
+  document.getElementById('toastMsg').textContent = msg;
+  const t = document.getElementById('toast');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
