@@ -68,7 +68,7 @@ async function fetchCampaignInsights(accountId, accessToken, dateFrom, dateTo) {
   return rows;
 }
 
-async function syncClientFacebook(client) {
+async function syncClientFacebook(client, dateFrom, dateTo) {
   if (!client.fb_account_id) return;
 
   const tokenRes = await query(
@@ -80,12 +80,16 @@ async function syncClientFacebook(client) {
     return;
   }
 
-  const token  = tokenRes.rows[0].access_token;
-  const today  = new Date();
-  const from   = new Date(today);
-  from.setDate(today.getDate() - 2);
-  const dateFrom = from.toISOString().slice(0, 10);
-  const dateTo   = today.toISOString().slice(0, 10);
+  const token = tokenRes.rows[0].access_token;
+
+  // Default window: last 2 days (safe for FB processing delay)
+  if (!dateFrom || !dateTo) {
+    const today = new Date();
+    const from  = new Date(today);
+    from.setDate(today.getDate() - 2);
+    dateFrom = from.toISOString().slice(0, 10);
+    dateTo   = today.toISOString().slice(0, 10);
+  }
 
   console.log('[FB] Syncing ' + client.name + ' (' + client.fb_account_id + ') ' + dateFrom + '-' + dateTo);
   const rows = await fetchCampaignInsights(client.fb_account_id, token, dateFrom, dateTo);
@@ -105,6 +109,7 @@ async function syncClientFacebook(client) {
   }
 
   console.log('[FB] ' + client.name + ': ' + rows.length + ' rows upserted');
+  return rows.length;
 }
 
 async function checkTokenExpiry(accessToken) {
@@ -122,4 +127,4 @@ async function checkTokenExpiry(accessToken) {
   };
 }
 
-module.exports = { syncClientFacebook: syncClientFacebook, fetchCampaignInsights: fetchCampaignInsights, checkTokenExpiry: checkTokenExpiry };
+module.exports = { syncClientFacebook, fetchCampaignInsights, checkTokenExpiry };

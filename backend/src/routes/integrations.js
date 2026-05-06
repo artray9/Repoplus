@@ -2,6 +2,7 @@ const express  = require('express');
 const { query } = require('../db');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { dailySync } = require('../jobs/sync');
+const { syncClientFacebook } = require('../services/facebook');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -20,7 +21,7 @@ router.get('/:clientId', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/integrations/token — сохранить токен вручную (Facebook long-lived token и т.д.)
+// POST /api/integrations/token — сохранить/обновить токен
 router.post('/token', requireAdmin, async (req, res) => {
   try {
     const { client_id, source, access_token, refresh_token, expires_at } = req.body;
@@ -40,14 +41,61 @@ router.post('/token', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/integrations/sync/manual — ручная синхронизация (вызывается из дашборда)
+// POST /api/integrations/sync/manual — ежедневный sync вручную
 router.post('/sync/manual', requireAdmin, async (req, res) => {
   try {
     res.json({ ok: true, message: 'Синхронизация запущена' });
-    // Запускаем асинхронно — не блокируем ответ
     dailySync().catch(e => console.error('[MANUAL SYNC] error:', e.message));
   } catch (e) {
     res.status(500).json({ error: 'Ошибка запуска синхронизации' });
+  }
+});
+
+// POST /api/integrations/sync/backfill — выгрузка за произвольный период
+// Body: { client_id?: uuid|null, from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }
+router.post('/sync/backfill', requireAdmin, async (req, res) => {
+  try {
+    const { client_id, from, to } = req.body;
+    if (!from || !to) {
+      return res.status(400).json({ error: 'from и to обязательны (YYYY-MM-DD)' });
+    }
+    // Validate date format
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return res.status(400).json({ error: 'Формат даты: YYYY-MM-DD' });
+    }
+    if (from > to) {
+      return res.status(400).json({ error: 'from должна быть раньше to' });
+    }
+
+    res.json({ ok: true, message: `Backfill запущен: ${from} — ${to}` });
+
+    // Run async
+    (async () => {
+      try {
+        const clientsRes = client_id
+          ? await query('SELECT * FROM clients WHERE id = $1 AND active = true', [client_id])
+          : await query('SELECT * FROM clients WHERE active = true');
+
+        const clients = clientsRes.rows;
+        console.log(`[BACKFILL] ${from}–${to} for ${clients.length} client(s)`);
+
+        for (const client of clients) {
+          try {
+            const n = await syncClientFacebook(client, from, to);
+            console.log(`[BACKFILL] ${client.name}: ${n} rows`);
+          } catch (e) {
+            console.error(`[BACKFILL] ${client.name} FB error:`, e.message);
+          }
+          // Rate-limit buffer between clients
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        console.log('[BACKFILL] Done');
+      } catch (e) {
+        console.error('[BACKFILL] Fatal:', e.message);
+      }
+    })();
+  } catch (e) {
+    res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
 

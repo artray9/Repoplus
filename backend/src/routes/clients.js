@@ -5,14 +5,25 @@ const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const router = express.Router();
 router.use(authMiddleware);
 
-// GET /api/clients — список клиентов
+// GET /api/clients — список клиентов (с has_token для UI)
 router.get('/', async (req, res) => {
   try {
-    const result = req.user.role === 'admin'
-      ? await query('SELECT * FROM clients ORDER BY name')
-      : await query('SELECT * FROM clients WHERE user_id = $1', [req.user.userId]);
+    const isAdmin = req.user.role === 'admin';
+    const sql = `
+      SELECT c.*,
+        EXISTS(
+          SELECT 1 FROM integration_tokens it
+          WHERE it.client_id = c.id AND it.source = 'facebook'
+        ) AS has_token
+      FROM clients c
+      ${isAdmin ? '' : 'WHERE c.user_id = $1'}
+      ORDER BY c.name`;
+    const result = isAdmin
+      ? await query(sql)
+      : await query(sql, [req.user.userId]);
     res.json(result.rows);
   } catch (e) {
+    console.error('[CLIENTS GET]', e.message);
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
@@ -25,10 +36,11 @@ router.post('/', requireAdmin, async (req, res) => {
     const result = await query(
       `INSERT INTO clients (name, fb_account_id, google_account_id, tt_account_id, amo_subdomain)
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [name, fb_account_id, google_account_id, tt_account_id, amo_subdomain]
+      [name, fb_account_id || null, google_account_id || null, tt_account_id || null, amo_subdomain || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (e) {
+    console.error('[CLIENTS POST]', e.message);
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
@@ -39,18 +51,19 @@ router.patch('/:id', requireAdmin, async (req, res) => {
     const { name, fb_account_id, google_account_id, tt_account_id, amo_subdomain, active } = req.body;
     const result = await query(
       `UPDATE clients SET
-        name = COALESCE($1, name),
-        fb_account_id = COALESCE($2, fb_account_id),
+        name              = COALESCE($1, name),
+        fb_account_id     = COALESCE($2, fb_account_id),
         google_account_id = COALESCE($3, google_account_id),
-        tt_account_id = COALESCE($4, tt_account_id),
-        amo_subdomain = COALESCE($5, amo_subdomain),
-        active = COALESCE($6, active)
+        tt_account_id     = COALESCE($4, tt_account_id),
+        amo_subdomain     = COALESCE($5, amo_subdomain),
+        active            = COALESCE($6, active)
        WHERE id = $7 RETURNING *`,
       [name, fb_account_id, google_account_id, tt_account_id, amo_subdomain, active, req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Клиент не найден' });
     res.json(result.rows[0]);
   } catch (e) {
+    console.error('[CLIENTS PATCH]', e.message);
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
@@ -61,6 +74,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
     await query('DELETE FROM clients WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
   } catch (e) {
+    console.error('[CLIENTS DELETE]', e.message);
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
