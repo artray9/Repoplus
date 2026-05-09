@@ -308,8 +308,14 @@
 
     <div class="sidebar-section">
       <div class="sidebar-section-label">Интеграции</div>
-      <div class="nav-item" onclick="setPage('integrations',this)">
-        <span class="nav-icon">🔌</span> Подключить
+      <div class="nav-item" onclick="setPage('settings',this)">
+        <span class="nav-icon">⚙️</span> Настройки
+      </div>
+      <div class="nav-item admin-only" onclick="setPage('users',this)">
+        <span class="nav-icon">👤</span> Пользователи
+      </div>
+      <div class="nav-item" onclick="setPage('balances',this)">
+        <span class="nav-icon">💰</span> Балансы
       </div>
       <div class="nav-item" onclick="window.location.href='index.html'">
         <span class="nav-icon">🏠</span> Лендинг
@@ -443,9 +449,11 @@
               <thead>
                 <tr>
                   <th>Клиент</th>
-                  <th>FB Account ID</th>
+                  <th>Аккаунты</th>
                   <th>Статус</th>
-                  <th>FB Токен</th>
+                  <th style="text-align:center">📘 FB</th>
+                  <th style="text-align:center">🎵 TT</th>
+                  <th style="text-align:center">🎯 GG</th>
                   <th>Действия</th>
                 </tr>
               </thead>
@@ -457,17 +465,122 @@
         <div class="backfill-card">
           <div class="backfill-title">📅 Выгрузка исторических данных</div>
           <div class="backfill-sub">Запустите ручную выгрузку за нужный период (обход лимита ежедневного окна)</div>
-          <div class="backfill-row">
+          <div class="backfill-row" style="margin-bottom:12px">
             <select id="backfillClient" style="width:auto">
               <option value="all">Все клиенты</option>
             </select>
             <input type="date" id="backfillFrom" title="Дата начала"/>
             <span style="color:var(--muted)">—</span>
             <input type="date" id="backfillTo" title="Дата конца"/>
-            <button class="btn-primary" id="backfillBtn" onclick="runBackfill()">📥 Выгрузить</button>
           </div>
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px">
+            <span style="font-size:12px;color:var(--muted);font-weight:600">Источники:</span>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="bfFacebook" checked style="accent-color:#1877F2"/> 📘 Facebook
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="bfTiktok" checked style="accent-color:#010101"/> 🎵 TikTok
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="bfGoogle" checked style="accent-color:#EA4335"/> 🎯 Google
+            </label>
+          </div>
+          <button class="btn-primary" id="backfillBtn" onclick="runBackfill()">📥 Выгрузить</button>
         </div>
       </div><!-- /pageClients -->
+      <!-- SETTINGS PAGE -->
+      <div id="pageSettings" class="page">
+        <div class="page-header">
+          <div class="page-title">⚙️ Настройки</div>
+          <button class="btn-primary" onclick="openAddKeyModal()">+ Добавить API-ключ</button>
+        </div>
+
+        <!-- API KEYS TABLE -->
+        <div class="table-card" style="margin-bottom:20px">
+          <div class="table-header-bar">
+            <div class="table-title">🔑 API-ключи</div>
+            <div style="font-size:13px;color:var(--sub)">Токены для подключения рекламных кабинетов</div>
+          </div>
+          <div style="overflow-x:auto">
+            <table id="apiKeysTable">
+              <thead>
+                <tr>
+                  <th>Название</th>
+                  <th>Источник</th>
+                  <th>Токен</th>
+                  <th>Добавлен</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody id="apiKeysBody">
+                <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:30px">Загрузка...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- SOURCE GUIDE -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:24px">
+          <div class="backfill-card">
+            <div class="backfill-title">📘 Facebook Ads</div>
+            <div class="backfill-sub">Долгоживущий токен (60 дней) из Graph API Explorer. Source: <code>facebook</code></div>
+          </div>
+          <div class="backfill-card">
+            <div class="backfill-title">🎯 Google Ads</div>
+            <div class="backfill-sub">Refresh Token из Google OAuth2. Source: <code>google</code>. Нужен также developer-token в env.</div>
+          </div>
+          <div class="backfill-card">
+            <div class="backfill-title">🎵 TikTok Ads</div>
+            <div class="backfill-sub">Access Token из TikTok Marketing API (долгоживущий). Source: <code>tiktok</code></div>
+          </div>
+        </div>
+
+        <!-- TELEGRAM SECTION -->
+        <div class="table-card" style="margin-bottom:20px">
+          <div class="table-header-bar">
+            <div class="table-title">🤖 Telegram-бот</div>
+            <div style="font-size:13px;color:var(--sub)">Уведомления и рассылки</div>
+          </div>
+          <div id="telegramSettingsBlock" style="padding:16px 0">
+            <div style="color:var(--muted);padding:20px">Загрузка...</div>
+          </div>
+        </div>
+
+        <!-- TELEGRAM SUBSCRIBERS -->
+        <div class="table-card">
+          <div class="table-header-bar">
+            <div class="table-title">📬 Подписчики</div>
+            <button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="openAddSubscriberModal()">+ Добавить чат</button>
+          </div>
+          <table style="width:100%">
+            <thead>
+              <tr>
+                <th>Чат / Группа</th>
+                <th>Chat ID</th>
+                <th>Типы уведомлений</th>
+                <th>Статус</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody id="tgSubscribersBody">
+              <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Загрузка...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- BROADCAST CARD -->
+        <div class="backfill-card" style="margin-top:20px">
+          <div class="backfill-title">📢 Ручная рассылка</div>
+          <div class="backfill-sub">Отправить сообщение всем подписчикам прямо сейчас</div>
+          <textarea id="broadcastText" style="width:100%;background:var(--bg-dark);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-size:13px;resize:vertical;margin-top:10px;min-height:80px" placeholder="Текст рассылки (поддерживается HTML: &lt;b&gt;, &lt;i&gt;, &lt;a href=...&gt;)"></textarea>
+          <div style="display:flex;gap:10px;margin-top:10px">
+            <button class="btn-primary" onclick="sendBroadcast()">📤 Отправить</button>
+            <button class="btn-cancel" onclick="document.getElementById('broadcastText').value=''">Очистить</button>
+          </div>
+        </div>
+      </div><!-- /pageSettings -->
+
+
 
     </div><!-- /mainScroll -->
   </div>
@@ -497,10 +610,41 @@ const API_BASE_URL = 'https://repoplus-production.up.railway.app';
       document.addEventListener('DOMContentLoaded', () => {
         const nameEl = document.querySelector('.user-name');
         if (nameEl) nameEl.textContent = user.name;
+        const roleEl = document.querySelector('.user-role');
+        if (roleEl) roleEl.textContent = user.role === 'admin' ? 'Administrator' : 'Viewer';
+        applyRoleVisibility();
       });
     }
   } catch(e) {}
 })();
+
+// Вспомогательная функция: fetch к API с автоматическим токеном + JSON парсинг
+async function apiFetch(path, options = {}) {
+  const resp = await authFetch(API_BASE_URL + path, options);
+  if (!resp) return null;
+  if (!resp.ok) {
+    const d = await resp.json().catch(() => ({}));
+    throw new Error(d.error || `HTTP ${resp.status}`);
+  }
+  return resp.json();
+}
+
+// ── Admin-only visibility ──────────────────────────────────────────────
+function getCurrentUser() {
+  try { return JSON.parse(localStorage.getItem('rp_user') || '{}'); }
+  catch(e) { return {}; }
+}
+function isAdmin() { return getCurrentUser().role === 'admin'; }
+
+function applyRoleVisibility() {
+  const admin = isAdmin();
+  document.querySelectorAll('.admin-only').forEach(el => {
+    el.style.display = admin ? '' : 'none';
+  });
+  document.querySelectorAll('.viewer-only').forEach(el => {
+    el.style.display = admin ? 'none' : '';
+  });
+}
 
 // Авторизованный fetch — автоматически добавляет Bearer токен
 async function authFetch(url, options = {}) {
@@ -936,6 +1080,9 @@ function setPage(page, el) {
     reports: 'Отчёты',
     alerts: 'Алерты и уведомления',
     integrations: 'Интеграции',
+    settings: 'Настройки',
+    users: 'Управление пользователями',
+    balances: 'Балансы рекламных кабинетов',
   };
   document.getElementById('topTitle').textContent = titles[page] || 'Дашборд';
   document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
@@ -952,6 +1099,9 @@ function setPage(page, el) {
     return;
   }
   if (page === 'clients') renderClientsPage();
+  if (page === 'settings') renderSettingsPage();
+  if (page === 'users') renderUsersPage();
+  if (page === 'balances') renderBalancesPage();
   if (page === 'dashboard') loadRealData();
 }
 
@@ -960,10 +1110,8 @@ let CLIENTS_FULL = []; // клиенты с токен-статусами
 
 async function renderClientsPage() {
   try {
-    const resp = await authFetch(`${API_BASE_URL}/api/clients`);
-    if (!resp || !resp.ok) return;
-    CLIENTS_FULL = await resp.json();
-  } catch(e) { console.error(e); return; }
+    CLIENTS_FULL = await apiFetch('/api/clients');
+  } catch(e) { console.error('[CLIENTS]', e); return; }
 
   const tbody = document.getElementById('clientsBody');
   const bfSel = document.getElementById('backfillClient');
@@ -987,17 +1135,28 @@ async function renderClientsPage() {
     return;
   }
 
+  const tok = (has, title) => has
+    ? `<td style="text-align:center" title="${title}"><span style="color:#10b981;font-size:16px">✅</span></td>`
+    : `<td style="text-align:center" title="Токен не подключён"><span style="color:var(--border);font-size:16px">○</span></td>`;
+
   tbody.innerHTML = CLIENTS_FULL.map(c => {
-    const hasFbId  = c.fb_account_id ? '✅' : '—';
-    const tokenBadge = c.has_token
-      ? '<span class="token-badge ok">✅ Есть</span>'
-      : '<span class="token-badge err">❌ Нет</span>';
+    const accounts = [
+      c.fb_account_id     ? `<div style="font-size:11px;color:var(--muted)">📘 ${c.fb_account_id}</div>`     : '',
+      c.tt_account_id     ? `<div style="font-size:11px;color:var(--muted)">🎵 ${c.tt_account_id}</div>`     : '',
+      c.google_account_id ? `<div style="font-size:11px;color:var(--muted)">🎯 ${c.google_account_id}</div>` : '',
+    ].filter(Boolean).join('') || '<span style="color:var(--muted);font-size:12px">—</span>';
+    const statusBadge = c.active
+      ? '<span class="status-badge">● Активен</span>'
+      : '<span class="status-badge" style="color:#f87171;border-color:#f87171">● Неактивен</span>';
     return `<tr>
       <td><b>${c.name}</b></td>
-      <td style="font-family:monospace;font-size:12px;color:var(--sub)">${c.fb_account_id || '—'}</td>
-      <td><span class="status-badge">● Активен</span></td>
-      <td>${tokenBadge}</td>
-      <td style="display:flex;gap:8px;align-items:center">
+      <td>${accounts}</td>
+      <td>${statusBadge}</td>
+      ${tok(c.has_fb_token,     'Facebook токен')}
+      ${tok(c.has_tt_token,     'TikTok токен')}
+      ${tok(c.has_google_token, 'Google токен')}
+      <td style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn-sm" onclick="openEditClientModal('${c.id}')">✏️</button>
         <button class="btn-sm" onclick="openTokenModal('${c.id}','${c.name}')">🔑 Токен</button>
         <button class="btn-danger" onclick="deleteClient('${c.id}','${c.name}')">Удалить</button>
       </td>
@@ -1007,9 +1166,11 @@ async function renderClientsPage() {
 
 // ── ADD CLIENT ────────────────────────────────────────────────
 function openAddClientModal() {
-  document.getElementById('newClientName').value = '';
-  document.getElementById('newClientFbId').value = '';
-  document.getElementById('newClientFbToken').value = '';
+  ['newClientName','newClientFbId','newClientFbToken','newClientGoogleId','newClientGoogleToken','newClientTtId','newClientTtToken'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  populateKeyDropdowns();
   document.getElementById('modalError').style.display = 'none';
   document.getElementById('addClientModal').classList.add('show');
 }
@@ -1017,14 +1178,38 @@ function closeAddClientModal() {
   document.getElementById('addClientModal').classList.remove('show');
 }
 function handleModalClick(e) {
-  if (e.target === e.currentTarget) closeAddClientModal();
+  if (e.target === e.currentTarget) {
+    closeAddClientModal();
+    if (document.getElementById('addUserModal').classList.contains('active')) return;
+  }
+}
+
+async function populateKeyDropdowns() {
+  try {
+    const keys = await apiFetch('/api/settings/api-keys');
+    const fill = (selId, source) => {
+      const sel = document.getElementById(selId);
+      if (!sel) return;
+      sel.innerHTML = '<option value="">— Выбрать сохранённый ключ —</option>';
+      (keys || []).filter(k => k.source === source).forEach(k => {
+        const opt = document.createElement('option');
+        opt.value = k.id;
+        opt.textContent = k.name;
+        sel.appendChild(opt);
+      });
+    };
+    fill('newClientFbKeyId',     'facebook');
+    fill('newClientGoogleKeyId', 'google');
+    fill('newClientTtKeyId',     'tiktok');
+  } catch(e) { console.warn('populateKeyDropdowns:', e.message); }
 }
 
 async function submitAddClient() {
-  const name  = document.getElementById('newClientName').value.trim();
-  const fbId  = document.getElementById('newClientFbId').value.trim();
-  const token = document.getElementById('newClientFbToken').value.trim();
-  const errEl = document.getElementById('modalError');
+  const name       = document.getElementById('newClientName').value.trim();
+  const fbId       = document.getElementById('newClientFbId').value.trim();
+  const googleId   = document.getElementById('newClientGoogleId').value.trim().replace(/-/g,'');
+  const ttId       = document.getElementById('newClientTtId').value.trim();
+  const errEl      = document.getElementById('modalError');
 
   if (!name) { errEl.textContent = 'Введите название клиента'; errEl.style.display='block'; return; }
 
@@ -1033,28 +1218,41 @@ async function submitAddClient() {
   errEl.style.display = 'none';
 
   try {
-    const resp = await authFetch(`${API_BASE_URL}/api/clients`, {
+    const created = await apiFetch('/api/clients', {
       method: 'POST',
-      body: JSON.stringify({ name, fb_account_id: fbId || null }),
+      body: JSON.stringify({
+        name,
+        fb_account_id:     fbId     || null,
+        google_account_id: googleId || null,
+        tt_account_id:     ttId     || null,
+      }),
     });
-    if (!resp || !resp.ok) {
-      const d = await resp.json().catch(()=>({}));
-      throw new Error(d.error || 'Ошибка сервера');
-    }
-    const created = await resp.json();
 
-    // Save FB token if provided
-    if (token && fbId) {
-      await authFetch(`${API_BASE_URL}/api/integrations/token`, {
-        method: 'POST',
-        body: JSON.stringify({ client_id: created.id, source: 'facebook', access_token: token }),
-      });
+    // Helper: apply key or manual token
+    async function saveToken(source, keySelId, manualInputId) {
+      const keyId  = document.getElementById(keySelId)?.value;
+      const manual = document.getElementById(manualInputId)?.value.trim();
+      if (keyId) {
+        await apiFetch('/api/settings/apply-key', {
+          method: 'POST',
+          body: JSON.stringify({ api_key_id: keyId, client_id: created.id }),
+        });
+      } else if (manual) {
+        await apiFetch('/api/integrations/token', {
+          method: 'POST',
+          body: JSON.stringify({ client_id: created.id, source, access_token: manual }),
+        });
+      }
     }
+
+    await saveToken('facebook', 'newClientFbKeyId',     'newClientFbToken');
+    await saveToken('google',   'newClientGoogleKeyId', 'newClientGoogleToken');
+    await saveToken('tiktok',   'newClientTtKeyId',     'newClientTtToken');
 
     closeAddClientModal();
     showToast('✅', `Клиент "${name}" добавлен`);
     renderClientsPage();
-    loadClients(); // обновить sidebar
+    loadClients();
   } catch(e) {
     errEl.textContent = e.message;
     errEl.style.display = 'block';
@@ -1067,23 +1265,50 @@ async function submitAddClient() {
 let _tokenClientId = null;
 function openTokenModal(clientId, clientName) {
   _tokenClientId = clientId;
-  const tok = prompt(`Вставьте Facebook Access Token для клиента "${clientName}":\n(оставьте пустым чтобы отменить)`);
-  if (!tok) return;
-  saveToken(clientId, tok.trim());
+  document.getElementById('tokenModalTitle').textContent = `🔑 Токены: ${clientName}`;
+  document.getElementById('tokenSource').value   = 'facebook';
+  document.getElementById('tokenValue').value    = '';
+  document.getElementById('tokenKeySelect').innerHTML = '<option value="">— Выбрать сохранённый ключ —</option>';
+  document.getElementById('manualTokenModal').classList.add('active');
+  updateTokenKeyDropdown();
 }
-async function saveToken(clientId, token) {
+async function updateTokenKeyDropdown() {
+  const source = document.getElementById('tokenSource').value;
   try {
-    const resp = await authFetch(`${API_BASE_URL}/api/integrations/token`, {
-      method: 'POST',
-      body: JSON.stringify({ client_id: clientId, source: 'facebook', access_token: token }),
+    const keys = await apiFetch('/api/settings/api-keys');
+    const sel  = document.getElementById('tokenKeySelect');
+    sel.innerHTML = '<option value="">— Выбрать сохранённый ключ —</option>';
+    (keys || []).filter(k => k.source === source).forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k.id; opt.textContent = k.name;
+      sel.appendChild(opt);
     });
-    if (resp && resp.ok) {
-      showToast('✅', 'Токен сохранён');
-      renderClientsPage();
+  } catch(e) {}
+}
+async function submitTokenModal() {
+  const source = document.getElementById('tokenSource').value;
+  const keyId  = document.getElementById('tokenKeySelect').value;
+  const manual = document.getElementById('tokenValue').value.trim();
+  const btn    = document.getElementById('tokenSaveBtn');
+  if (!keyId && !manual) { showToast('⚠️', 'Введите токен или выберите ключ'); return; }
+  btn.disabled = true; btn.textContent = 'Сохраняю...';
+  try {
+    if (keyId) {
+      await apiFetch('/api/settings/apply-key', {
+        method: 'POST',
+        body: JSON.stringify({ api_key_id: keyId, client_id: _tokenClientId }),
+      });
     } else {
-      showToast('❌', 'Ошибка сохранения токена');
+      await apiFetch('/api/integrations/token', {
+        method: 'POST',
+        body: JSON.stringify({ client_id: _tokenClientId, source, access_token: manual }),
+      });
     }
-  } catch(e) { showToast('❌', 'Сервер недоступен'); }
+    showToast('✅', 'Токен сохранён');
+    document.getElementById('manualTokenModal').classList.remove('active');
+    renderClientsPage();
+  } catch(e) { showToast('❌', e.message); }
+  finally { btn.disabled = false; btn.textContent = 'Сохранить'; }
 }
 
 // ── DELETE CLIENT ─────────────────────────────────────────────
@@ -1108,22 +1333,92 @@ async function runBackfill() {
   const to       = document.getElementById('backfillTo').value;
   if (!from || !to) { showToast('⚠️', 'Укажите период выгрузки'); return; }
 
+  // Собираем выбранные источники
+  const sources = [];
+  if (document.getElementById('bfFacebook')?.checked) sources.push('facebook');
+  if (document.getElementById('bfTiktok')?.checked)   sources.push('tiktok');
+  if (document.getElementById('bfGoogle')?.checked)   sources.push('google');
+  if (!sources.length) { showToast('⚠️', 'Выберите хотя бы один источник'); return; }
+
   const btn = document.getElementById('backfillBtn');
   btn.disabled = true; btn.textContent = '⏳ Выгружаю...';
 
   try {
-    const resp = await authFetch(`${API_BASE_URL}/api/integrations/sync/backfill`, {
+    const result = await apiFetch('/api/integrations/sync/backfill', {
       method: 'POST',
-      body: JSON.stringify({ client_id: clientId === 'all' ? null : clientId, from, to }),
+      body: JSON.stringify({
+        client_id: clientId === 'all' ? null : clientId,
+        from, to, sources,
+      }),
     });
-    if (resp && resp.ok) {
-      showToast('✅', `Выгрузка запущена: ${from} — ${to}`);
-    } else {
-      showToast('❌', 'Ошибка запуска выгрузки');
-    }
-  } catch(e) { showToast('❌', 'Сервер недоступен'); }
+    showToast('✅', result.message || `Выгрузка запущена: ${from} — ${to}`);
+  } catch(e) { showToast('❌', e.message || 'Ошибка запуска'); }
   finally { btn.disabled = false; btn.textContent = '📥 Выгрузить'; }
 }
+
+
+// ── SETTINGS / API KEYS ───────────────────────────────────────
+let API_KEYS = [];
+
+async function renderSettingsPage() {
+  try {
+    const resp = await authFetch(`${API_BASE_URL}/api/settings/api-keys`);
+    if (!resp || !resp.ok) return;
+    API_KEYS = await resp.json();
+  } catch(e) { console.error(e); return; }
+
+  const tbody = document.getElementById('apiKeysBody');
+  if (!API_KEYS.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:30px">Нет ключей — добавьте первый</td></tr>';
+    return;
+  }
+  const srcLabel = { facebook:'📘 Facebook', google:'🎯 Google', tiktok:'🎵 TikTok', amocrm:'📋 amoCRM' };
+  tbody.innerHTML = API_KEYS.map(k => `<tr>
+    <td><b>${k.name}</b></td>
+    <td>${srcLabel[k.source] || k.source}</td>
+    <td style="font-family:monospace;font-size:12px;color:var(--sub)">${k.token_preview}</td>
+    <td style="color:var(--sub);font-size:12px">${new Date(k.created_at).toLocaleDateString('ru-RU')}</td>
+    <td><button class="btn-danger" onclick="deleteApiKey('${k.id}','${k.name}')">Удалить</button></td>
+  </tr>`).join('');
+}
+
+function openAddKeyModal() {
+  document.getElementById('newKeyName').value  = '';
+  document.getElementById('newKeyToken').value = '';
+  document.getElementById('keyModalError').style.display = 'none';
+  document.getElementById('addKeyModal').classList.add('show');
+}
+function closeAddKeyModal() {
+  document.getElementById('addKeyModal').classList.remove('show');
+}
+async function submitAddKey() {
+  const name   = document.getElementById('newKeyName').value.trim();
+  const source = document.getElementById('newKeySource').value;
+  const token  = document.getElementById('newKeyToken').value.trim();
+  const errEl  = document.getElementById('keyModalError');
+  if (!name || !token) { errEl.textContent = 'Заполните название и токен'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('keySaveBtn');
+  btn.disabled = true; btn.textContent = 'Сохранение...';
+  errEl.style.display = 'none';
+  try {
+    const resp = await authFetch(`${API_BASE_URL}/api/settings/api-keys`, {
+      method: 'POST',
+      body: JSON.stringify({ name, source, access_token: token }),
+    });
+    if (!resp || !resp.ok) { const d = await resp.json().catch(()=>({})); throw new Error(d.error || 'Ошибка'); }
+    closeAddKeyModal();
+    showToast('✅', `Ключ "${name}" сохранён`);
+    renderSettingsPage();
+  } catch(e) { errEl.textContent = e.message; errEl.style.display='block'; }
+  finally { btn.disabled = false; btn.textContent = 'Сохранить'; }
+}
+async function deleteApiKey(id, name) {
+  if (!confirm(`Удалить ключ "${name}"?`)) return;
+  const resp = await authFetch(`${API_BASE_URL}/api/settings/api-keys/${id}`, { method: 'DELETE' });
+  if (resp && resp.ok) { showToast('✅', 'Ключ удалён'); renderSettingsPage(); }
+}
+
+// populateFbKeyDropdown() replaced by populateKeyDropdowns()
 
 function showToast(icon, msg) {
   document.getElementById('toastIcon').textContent = icon;
@@ -1134,28 +1429,727 @@ function showToast(icon, msg) {
 }
 </script>
 
+
+<!-- ADD API KEY MODAL -->
+<div class="modal-overlay" id="addKeyModal" onclick="if(event.target===this)closeAddKeyModal()">
+  <div class="modal">
+    <div class="modal-title">Новый API-ключ</div>
+    <div class="form-field">
+      <label class="form-label">Название *</label>
+      <input class="form-input" id="newKeyName" placeholder="Основной FB токен агентства"/>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Источник *</label>
+      <select class="form-input" id="newKeySource">
+        <option value="facebook">📘 Facebook Ads</option>
+        <option value="google">🎯 Google Ads</option>
+        <option value="tiktok">🎵 TikTok Ads</option>
+        <option value="amocrm">📋 amoCRM</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Access Token *</label>
+      <textarea class="form-input" id="newKeyToken" rows="3" placeholder="EAABs..." style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+      <div class="form-hint">FB: Graph API Explorer → Generate Access Token → долгоживущий (60 дней)</div>
+    </div>
+    <div id="keyModalError" style="color:var(--red);font-size:13px;margin-top:4px;display:none"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeAddKeyModal()">Отмена</button>
+      <button class="btn-primary" id="keySaveBtn" onclick="submitAddKey()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- USERS PAGE -->
+<div id="pageUsers" class="page">
+  <div class="page-header">
+    <div class="page-title">👤 Пользователи</div>
+    <button class="btn-primary" onclick="openAddUserModal()">+ Добавить пользователя</button>
+  </div>
+  <div class="table-card">
+    <div style="overflow-x:auto">
+      <table id="usersTable">
+        <thead>
+          <tr>
+            <th>Имя</th>
+            <th>Email</th>
+            <th>Роль</th>
+            <th>Дата регистрации</th>
+            <th>Доступ к клиентам</th>
+            <th>Действия</th>
+          </tr>
+        </thead>
+        <tbody id="usersBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- BALANCES PAGE -->
+<div id="pageBalances" class="page">
+  <div class="page-header">
+    <div class="page-title">💰 Балансы</div>
+    <button class="btn-primary" onclick="refreshBalances()">🔄 Обновить</button>
+  </div>
+  <div id="balancesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;"></div>
+  <div class="table-card" style="margin-top:20px">
+    <div class="table-header-bar"><div class="table-title">Детали по кабинетам</div></div>
+    <div style="overflow-x:auto">
+      <table id="balancesTable">
+        <thead>
+          <tr>
+            <th>Клиент</th>
+            <th>Источник</th>
+            <th>Баланс</th>
+            <th>Валюта</th>
+            <th>Лимит расходов</th>
+            <th>Обновлено</th>
+          </tr>
+        </thead>
+        <tbody id="balancesBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ADD USER MODAL -->
+<div class="modal-overlay" id="addUserModal" onclick="handleModalClick(event)">
+  <div class="modal">
+    <div class="modal-title" id="userModalTitle">Новый пользователь</div>
+    <input type="hidden" id="editUserId"/>
+    <div class="form-field">
+      <label class="form-label">Имя</label>
+      <input class="form-input" id="newUserName" placeholder="Иван Иванов" autocomplete="off"/>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Email *</label>
+      <input class="form-input" id="newUserEmail" placeholder="ivan@company.kz" autocomplete="off"/>
+    </div>
+    <div class="form-field" id="userPasswordField">
+      <label class="form-label">Пароль *</label>
+      <input class="form-input" id="newUserPassword" type="password" placeholder="Минимум 6 символов" autocomplete="new-password"/>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Роль</label>
+      <select class="form-input" id="newUserRole">
+        <option value="viewer">Viewer (просмотр)</option>
+        <option value="admin">Admin (полный доступ)</option>
+      </select>
+    </div>
+    <div class="form-field" id="userAccessField">
+      <label class="form-label">Доступ к клиентам (для viewer)</label>
+      <div id="userClientsCheckboxes" style="display:flex;flex-direction:column;gap:8px;max-height:160px;overflow-y:auto;padding:8px;background:var(--bg-dark);border-radius:8px;border:1px solid var(--border)"></div>
+    </div>
+    <div id="userModalError" style="color:var(--red);font-size:13px;margin-top:4px;display:none"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeUserModal()">Отмена</button>
+      <button class="btn-primary" id="userSaveBtn" onclick="submitUser()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
 <!-- ADD CLIENT MODAL -->
 <div class="modal-overlay" id="addClientModal" onclick="handleModalClick(event)">
-  <div class="modal">
+  <div class="modal" style="max-width:520px">
     <div class="modal-title">Новый клиент</div>
     <div class="form-field">
       <label class="form-label">Название клиента *</label>
       <input class="form-input" id="newClientName" placeholder="Oscar Clinic" autocomplete="off"/>
     </div>
-    <div class="form-field">
-      <label class="form-label">Facebook Account ID *</label>
-      <input class="form-input" id="newClientFbId" placeholder="887539630709017" autocomplete="off"/>
-      <div class="form-hint">Ads Manager → Настройки → ID рекламного аккаунта (без act_)</div>
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:12px">📘 Facebook Ads</div>
+      <div class="form-field" style="margin-bottom:10px">
+        <label class="form-label">Account ID</label>
+        <input class="form-input" id="newClientFbId" placeholder="887539630709017" autocomplete="off"/>
+        <div class="form-hint">Ads Manager → Настройки → ID аккаунта (без act_)</div>
+      </div>
+      <div class="form-field" style="margin-bottom:0">
+        <label class="form-label">Access Token</label>
+        <select class="form-input" id="newClientFbKeyId" style="margin-bottom:6px">
+          <option value="">— Выбрать сохранённый ключ —</option>
+        </select>
+        <input class="form-input" id="newClientFbToken" placeholder="или вставьте токен вручную" autocomplete="off"/>
+      </div>
     </div>
-    <div class="form-field">
-      <label class="form-label">Facebook Access Token</label>
-      <input class="form-input" id="newClientFbToken" placeholder="EAABs... (необязательно)" autocomplete="off"/>
-      <div class="form-hint">Можно добавить позже. Токен нужен для синхронизации данных.</div>
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:600;color:#EA4335;margin-bottom:12px">🎯 Google Ads</div>
+      <div class="form-field" style="margin-bottom:10px">
+        <label class="form-label">Customer ID</label>
+        <input class="form-input" id="newClientGoogleId" placeholder="123-456-7890" autocomplete="off"/>
+        <div class="form-hint">Google Ads → Настройки → ID клиента</div>
+      </div>
+      <div class="form-field" style="margin-bottom:0">
+        <label class="form-label">Refresh Token</label>
+        <select class="form-input" id="newClientGoogleKeyId" style="margin-bottom:6px">
+          <option value="">— Выбрать сохранённый ключ —</option>
+        </select>
+        <input class="form-input" id="newClientGoogleToken" placeholder="или вставьте refresh_token вручную" autocomplete="off"/>
+      </div>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:600;color:#888;margin-bottom:12px">🎵 TikTok Ads</div>
+      <div class="form-field" style="margin-bottom:10px">
+        <label class="form-label">Advertiser ID</label>
+        <input class="form-input" id="newClientTtId" placeholder="7012345678901234567" autocomplete="off"/>
+        <div class="form-hint">TikTok Business Center → Рекламный аккаунт → ID</div>
+      </div>
+      <div class="form-field" style="margin-bottom:0">
+        <label class="form-label">Access Token</label>
+        <select class="form-input" id="newClientTtKeyId" style="margin-bottom:6px">
+          <option value="">— Выбрать сохранённый ключ —</option>
+        </select>
+        <input class="form-input" id="newClientTtToken" placeholder="или вставьте токен вручную" autocomplete="off"/>
+      </div>
     </div>
     <div id="modalError" style="color:var(--red);font-size:13px;margin-top:4px;display:none"></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeAddClientModal()">Отмена</button>
       <button class="btn-primary" id="modalSaveBtn" onclick="submitAddClient()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+
+// ══════════════════════════════════════════════════════════════
+// USERS PAGE
+// ══════════════════════════════════════════════════════════════
+let USERS_FULL = [];
+let CLIENTS_FOR_ACCESS = [];
+
+async function renderUsersPage() {
+  try {
+    const [usersRes, clientsRes] = await Promise.all([
+      apiFetch('/api/users'),
+      apiFetch('/api/clients'),
+    ]);
+    USERS_FULL = usersRes;
+    CLIENTS_FOR_ACCESS = clientsRes;
+    renderUsersTable(USERS_FULL);
+  } catch (e) {
+    showToast('❌', 'Ошибка загрузки пользователей: ' + e.message);
+  }
+}
+
+function renderUsersTable(users) {
+  const tbody = document.getElementById('usersBody');
+  if (!users.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">Нет пользователей</td></tr>';
+    return;
+  }
+  tbody.innerHTML = users.map(u => {
+    const accessList = (u.client_access || []).map(a => `<span style="background:var(--bg-dark);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:11px">${a.client_name}</span>`).join(' ');
+    const roleChip = u.role === 'admin'
+      ? '<span style="background:#6C63FF22;color:#6C63FF;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600">admin</span>'
+      : '<span style="background:#10b98122;color:#10b981;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600">viewer</span>';
+    const created = u.created_at ? new Date(u.created_at).toLocaleDateString('ru') : '—';
+    return `<tr>
+      <td><strong>${escHtml(u.name || u.email)}</strong></td>
+      <td style="color:var(--muted)">${escHtml(u.email)}</td>
+      <td>${roleChip}</td>
+      <td style="color:var(--muted);font-size:12px">${created}</td>
+      <td>${accessList || '<span style="color:var(--muted);font-size:12px">—</span>'}</td>
+      <td>
+        <button class="act-btn" onclick="openEditUserModal('${u.id}')">✏️</button>
+        <button class="act-btn" onclick="openAccessModal('${u.id}','${escHtml(u.name || u.email)}')" title="Доступ к клиентам">🔑</button>
+        <button class="act-btn" style="color:var(--red)" onclick="deleteUser('${u.id}','${escHtml(u.name || u.email)}')">🗑️</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function escHtml(str) {
+  return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function openAddUserModal() {
+  document.getElementById('userModalTitle').textContent = 'Новый пользователь';
+  document.getElementById('editUserId').value = '';
+  document.getElementById('newUserName').value = '';
+  document.getElementById('newUserEmail').value = '';
+  document.getElementById('newUserPassword').value = '';
+  document.getElementById('newUserRole').value = 'viewer';
+  document.getElementById('userPasswordField').style.display = '';
+  document.getElementById('userModalError').style.display = 'none';
+  renderUserClientsCheckboxes([]);
+  document.getElementById('addUserModal').classList.add('active');
+}
+
+function openEditUserModal(userId) {
+  const u = USERS_FULL.find(x => x.id === userId);
+  if (!u) return;
+  document.getElementById('userModalTitle').textContent = 'Редактировать пользователя';
+  document.getElementById('editUserId').value = u.id;
+  document.getElementById('newUserName').value = u.name || '';
+  document.getElementById('newUserEmail').value = u.email;
+  document.getElementById('newUserPassword').value = '';
+  document.getElementById('newUserRole').value = u.role;
+  document.getElementById('userPasswordField').style.display = '';
+  document.getElementById('userModalError').style.display = 'none';
+  const currentIds = (u.client_access || []).map(a => a.client_id);
+  renderUserClientsCheckboxes(currentIds);
+  document.getElementById('addUserModal').classList.add('active');
+}
+
+function renderUserClientsCheckboxes(selectedIds) {
+  const box = document.getElementById('userClientsCheckboxes');
+  box.innerHTML = CLIENTS_FOR_ACCESS.map(c => `
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+      <input type="checkbox" value="${c.id}" ${selectedIds.includes(c.id) ? 'checked' : ''} style="accent-color:var(--accent)"/>
+      ${escHtml(c.name)}
+    </label>
+  `).join('');
+}
+
+function closeUserModal() {
+  document.getElementById('addUserModal').classList.remove('active');
+}
+
+async function submitUser() {
+  const btn = document.getElementById('userSaveBtn');
+  const errEl = document.getElementById('userModalError');
+  errEl.style.display = 'none';
+  const userId = document.getElementById('editUserId').value;
+  const name     = document.getElementById('newUserName').value.trim();
+  const email    = document.getElementById('newUserEmail').value.trim();
+  const password = document.getElementById('newUserPassword').value;
+  const role     = document.getElementById('newUserRole').value;
+
+  if (!email) { errEl.textContent = 'Email обязателен'; errEl.style.display = ''; return; }
+  if (!userId && !password) { errEl.textContent = 'Пароль обязателен для нового пользователя'; errEl.style.display = ''; return; }
+  if (password && password.length < 6) { errEl.textContent = 'Пароль минимум 6 символов'; errEl.style.display = ''; return; }
+
+  btn.disabled = true; btn.textContent = 'Сохраняю...';
+  try {
+    let savedUser;
+    if (userId) {
+      const body = { name, role };
+      if (password) body.password = password;
+      savedUser = await apiFetch('/api/users/' + userId, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      savedUser = await apiFetch('/api/users', { method: 'POST', body: JSON.stringify({ email, password, name, role }) });
+    }
+
+    // Sync client access for viewer
+    const checkboxes = document.querySelectorAll('#userClientsCheckboxes input[type=checkbox]');
+    const selectedIds = [...checkboxes].filter(c => c.checked).map(c => c.value);
+    const uid = savedUser.id || userId;
+    // Get current access
+    const currentAccess = await apiFetch('/api/users/' + uid + '/access');
+    const currentIds = currentAccess.map(a => a.client_id);
+    // Add new
+    for (const cid of selectedIds) {
+      if (!currentIds.includes(cid)) {
+        await apiFetch('/api/users/' + uid + '/access', { method: 'POST', body: JSON.stringify({ client_id: cid }) });
+      }
+    }
+    // Remove removed
+    for (const cid of currentIds) {
+      if (!selectedIds.includes(cid)) {
+        await apiFetch('/api/users/' + uid + '/access/' + cid, { method: 'DELETE' });
+      }
+    }
+
+    showToast('✅', userId ? 'Пользователь обновлён' : 'Пользователь создан');
+    closeUserModal();
+    renderUsersPage();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.style.display = '';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Сохранить';
+  }
+}
+
+async function deleteUser(userId, name) {
+  if (!confirm('Удалить пользователя «' + name + '»?')) return;
+  try {
+    await apiFetch('/api/users/' + userId, { method: 'DELETE' });
+    showToast('✅', 'Пользователь удалён');
+    renderUsersPage();
+  } catch (e) {
+    showToast('❌', e.message);
+  }
+}
+
+async function openAccessModal(userId, name) {
+  // Shortcut: open edit modal already filtered to that user
+  openEditUserModal(userId);
+}
+
+// ══════════════════════════════════════════════════════════════
+// BALANCES PAGE
+// ══════════════════════════════════════════════════════════════
+async function renderBalancesPage() {
+  const grid = document.getElementById('balancesGrid');
+  const tbody = document.getElementById('balancesBody');
+  grid.innerHTML = '<div style="color:var(--muted);padding:20px">Загрузка...</div>';
+  tbody.innerHTML = '';
+  try {
+    const rows = await apiFetch('/api/analytics/balances');
+    if (!rows.length) {
+      grid.innerHTML = '<div style="color:var(--muted);padding:20px">Нет данных о балансах. Запустите синхронизацию или добавьте токены.</div>';
+      return;
+    }
+
+    // Group by client
+    const byClient = {};
+    rows.forEach(r => {
+      if (!byClient[r.client_id]) byClient[r.client_id] = { name: r.client_name, balances: [] };
+      byClient[r.client_id].balances.push(r);
+    });
+
+    // Cards
+    const srcColors = { facebook: '#1877F2', tiktok: '#010101', google: '#EA4335' };
+    const srcIcons  = { facebook: '📘', tiktok: '🎵', google: '🔵' };
+    grid.innerHTML = Object.values(byClient).map(cl => {
+      const totalUSD = cl.balances.reduce((s, b) => s + parseFloat(b.balance || 0), 0);
+      const rows = cl.balances.map(b =>
+        `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:13px">${srcIcons[b.source] || '💳'} ${b.source}</span>
+          <strong style="color:${b.balance > 0 ? '#10b981' : '#f87171'}">${parseFloat(b.balance||0).toFixed(2)} ${b.currency}</strong>
+        </div>`
+      ).join('');
+      return `<div class="chart-card">
+        <div style="font-weight:700;font-size:15px;margin-bottom:12px">${escHtml(cl.name)}</div>
+        ${rows}
+        <div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px">
+          <span style="color:var(--muted);font-size:12px">Итого</span>
+          <strong>≈${totalUSD.toFixed(2)} USD</strong>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Table
+    tbody.innerHTML = rows.map(r => {
+      const updated = r.fetched_at ? new Date(r.fetched_at).toLocaleString('ru') : '—';
+      const balColor = parseFloat(r.balance) > 0 ? '#10b981' : '#f87171';
+      return `<tr>
+        <td><strong>${escHtml(r.client_name)}</strong></td>
+        <td>${srcIcons[r.source] || '💳'} ${r.source}</td>
+        <td style="color:${balColor};font-weight:600">${parseFloat(r.balance||0).toFixed(2)}</td>
+        <td>${r.currency}</td>
+        <td style="color:var(--muted)">${r.spend_cap ? parseFloat(r.spend_cap).toFixed(2) : '—'}</td>
+        <td style="color:var(--muted);font-size:12px">${updated}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    grid.innerHTML = '<div style="color:var(--red);padding:20px">Ошибка: ' + e.message + '</div>';
+  }
+}
+
+async function refreshBalances() {
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '⏳ Синхронизация...';
+  try {
+    await apiFetch('/api/integrations/sync/manual', { method: 'POST' });
+    showToast('✅', 'Синхронизация запущена, обновите через минуту');
+    setTimeout(() => renderBalancesPage(), 8000);
+  } catch (e) {
+    showToast('❌', e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '🔄 Обновить';
+  }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// TELEGRAM SETTINGS
+// ══════════════════════════════════════════════════════════════
+const TG_NOTIFICATION_TYPES = [
+  { value: 'daily_report',  label: '📊 Ежедневный отчёт' },
+  { value: 'budget_alert',  label: '⚠️ Низкий баланс' },
+  { value: 'cpl_alert',     label: '🚨 Высокий CPL' },
+  { value: 'zero_leads',    label: '😶 Ноль лидов' },
+  { value: 'sync_done',     label: '✅ Синхронизация завершена' },
+];
+
+async function renderTelegramSettings() {
+  const block = document.getElementById('telegramSettingsBlock');
+  const tbody = document.getElementById('tgSubscribersBody');
+  if (!block) return;
+  try {
+    const [cfg, subs] = await Promise.all([
+      apiFetch('/api/telegram/settings'),
+      apiFetch('/api/telegram/subscribers'),
+    ]);
+
+    // Bot config block
+    if (cfg) {
+      block.innerHTML = `
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div style="background:#10b98122;border:1px solid #10b981;border-radius:8px;padding:8px 16px;display:flex;align-items:center;gap:8px">
+            <span style="color:#10b981;font-size:18px">✅</span>
+            <div>
+              <div style="font-weight:600;font-size:13px">@${cfg.bot_username}</div>
+              <div style="color:var(--muted);font-size:11px">Токен: ${cfg.bot_token_preview} · ${cfg.subscriber_count} подписчик(ов)</div>
+            </div>
+          </div>
+          <button class="btn-cancel" onclick="openBotTokenModal()" style="font-size:12px">🔄 Сменить токен</button>
+        </div>`;
+    } else {
+      block.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;padding:4px 0">
+          <span style="color:var(--muted)">Бот не подключён</span>
+          <button class="btn-primary" onclick="openBotTokenModal()" style="font-size:12px;padding:6px 14px">🤖 Подключить бота</button>
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--muted)">
+          1. Создайте бота через <b>@BotFather</b> → /newbot<br>
+          2. Скопируйте токен<br>
+          3. Нажмите «Подключить бота» и вставьте токен<br>
+          4. Добавьте бота в нужный чат/группу и получите chat_id
+        </div>`;
+    }
+
+    // Subscribers table
+    if (!subs || !subs.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Нет подписчиков. Добавьте первый чат.</td></tr>';
+    } else {
+      tbody.innerHTML = subs.map(s => {
+        const types = (s.notification_types || []).map(t => {
+          const found = TG_NOTIFICATION_TYPES.find(x => x.value === t);
+          return `<span style="background:var(--bg-dark);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:10px;white-space:nowrap">${found ? found.label : t}</span>`;
+        }).join(' ');
+        const statusColor = s.active ? '#10b981' : '#f87171';
+        return `<tr>
+          <td><strong>${s.chat_name || '—'}</strong></td>
+          <td style="color:var(--muted);font-family:monospace;font-size:12px">${s.chat_id}</td>
+          <td style="max-width:280px">${types}</td>
+          <td><span style="color:${statusColor};font-size:12px">${s.active ? '✅ Активен' : '⏸ Пауза'}</span></td>
+          <td>
+            <button class="act-btn" onclick="testTgMessage('${s.chat_id}')" title="Тест">🔔</button>
+            <button class="act-btn" onclick="toggleSubscriber('${s.id}',${!s.active})" title="${s.active ? 'Пауза' : 'Активировать'}">${s.active ? '⏸' : '▶️'}</button>
+            <button class="act-btn" style="color:var(--red)" onclick="deleteSubscriber('${s.id}')">🗑️</button>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+  } catch(e) {
+    block.innerHTML = `<div style="color:var(--red);padding:16px">Ошибка: ${e.message}</div>`;
+  }
+}
+
+// Override renderSettingsPage to also load Telegram
+const _origRenderSettings = renderSettingsPage;
+async function renderSettingsPage() {
+  await _origRenderSettings();
+  await renderTelegramSettings();
+}
+
+function openBotTokenModal() {
+  const tok = prompt('Вставьте токен Telegram-бота (от @BotFather):');
+  if (!tok || !tok.trim()) return;
+  apiFetch('/api/telegram/settings', {
+    method: 'POST',
+    body: JSON.stringify({ bot_token: tok.trim() }),
+  }).then(r => {
+    showToast('✅', `Бот @${r.username} подключён`);
+    renderTelegramSettings();
+  }).catch(e => showToast('❌', e.message));
+}
+
+function openAddSubscriberModal() {
+  document.getElementById('addSubscriberModal').classList.add('active');
+  const box = document.getElementById('subNotifTypes');
+  box.innerHTML = TG_NOTIFICATION_TYPES.map(t => `
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+      <input type="checkbox" value="${t.value}" checked style="accent-color:var(--accent)"/>
+      ${t.label}
+    </label>`).join('');
+}
+
+async function submitAddSubscriber() {
+  const chatId   = document.getElementById('subChatId').value.trim();
+  const chatName = document.getElementById('subChatName').value.trim();
+  if (!chatId) { showToast('❌', 'Chat ID обязателен'); return; }
+  const types = [...document.querySelectorAll('#subNotifTypes input:checked')].map(c => c.value);
+  try {
+    await apiFetch('/api/telegram/subscribers', {
+      method: 'POST',
+      body: JSON.stringify({ chat_id: chatId, chat_name: chatName || chatId, notification_types: types }),
+    });
+    showToast('✅', 'Подписчик добавлен');
+    document.getElementById('addSubscriberModal').classList.remove('active');
+    document.getElementById('subChatId').value = '';
+    document.getElementById('subChatName').value = '';
+    renderTelegramSettings();
+  } catch(e) { showToast('❌', e.message); }
+}
+
+async function toggleSubscriber(id, active) {
+  await apiFetch('/api/telegram/subscribers/' + id, {
+    method: 'PATCH',
+    body: JSON.stringify({ active }),
+  });
+  renderTelegramSettings();
+}
+
+async function deleteSubscriber(id) {
+  if (!confirm('Удалить подписчика?')) return;
+  await apiFetch('/api/telegram/subscribers/' + id, { method: 'DELETE' });
+  showToast('✅', 'Удалено');
+  renderTelegramSettings();
+}
+
+async function testTgMessage(chatId) {
+  try {
+    await apiFetch('/api/telegram/test', { method: 'POST', body: JSON.stringify({ chat_id: chatId }) });
+    showToast('✅', 'Тестовое сообщение отправлено');
+  } catch(e) { showToast('❌', e.message); }
+}
+
+async function sendBroadcast() {
+  const text = document.getElementById('broadcastText').value.trim();
+  if (!text) { showToast('❌', 'Введите текст'); return; }
+  try {
+    const r = await apiFetch('/api/telegram/broadcast', { method: 'POST', body: JSON.stringify({ message: text }) });
+    showToast('✅', `Отправлено: ${r.sent}, ошибок: ${r.failed}`);
+    document.getElementById('broadcastText').value = '';
+  } catch(e) { showToast('❌', e.message); }
+}
+
+// ══════════════════════════════════════════════════════════════
+// VIEWER MODE — фильтрация клиентов по доступу
+// ══════════════════════════════════════════════════════════════
+// Если viewer — фильтруем клиентский список и убираем admin-разделы
+function applyViewerFilter(clients) {
+  const user = getCurrentUser();
+  if (user.role === 'admin') return clients;
+  // Viewer видит только клиентов из client_access (backend уже фильтрует через /api/clients)
+  return clients;
+}
+
+<!-- ADD SUBSCRIBER MODAL -->
+<div class="modal-overlay" id="addSubscriberModal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal">
+    <div class="modal-title">Новый подписчик</div>
+    <div class="form-field">
+      <label class="form-label">Chat ID *</label>
+      <input class="form-input" id="subChatId" placeholder="-1001234567890" autocomplete="off"/>
+      <div class="form-hint">Получить: добавьте @userinfobot в чат, или напишите боту и проверьте updates через /api/telegram/test</div>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Название чата</label>
+      <input class="form-input" id="subChatName" placeholder="Команда Repoplus" autocomplete="off"/>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Типы уведомлений</label>
+      <div id="subNotifTypes" style="display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--bg-dark);border-radius:8px;border:1px solid var(--border)"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('addSubscriberModal').classList.remove('active')">Отмена</button>
+      <button class="btn-primary" onclick="submitAddSubscriber()">Добавить</button>
+    </div>
+  </div>
+</div>
+
+
+// ── EDIT CLIENT ───────────────────────────────────────────────
+function openEditClientModal(clientId) {
+  const c = CLIENTS_FULL.find(x => x.id === clientId);
+  if (!c) return;
+  document.getElementById('editClientId').value         = c.id;
+  document.getElementById('editClientName').value       = c.name;
+  document.getElementById('editClientFbId').value       = c.fb_account_id     || '';
+  document.getElementById('editClientGoogleId').value   = c.google_account_id || '';
+  document.getElementById('editClientTtId').value       = c.tt_account_id     || '';
+  document.getElementById('editClientAmo').value        = c.amo_subdomain     || '';
+  document.getElementById('editClientActive').checked   = c.active !== false;
+  document.getElementById('editClientModal').classList.add('active');
+}
+async function submitEditClient() {
+  const id     = document.getElementById('editClientId').value;
+  const name   = document.getElementById('editClientName').value.trim();
+  const fbId   = document.getElementById('editClientFbId').value.trim();
+  const goId   = document.getElementById('editClientGoogleId').value.trim().replace(/-/g,'');
+  const ttId   = document.getElementById('editClientTtId').value.trim();
+  const amo    = document.getElementById('editClientAmo').value.trim();
+  const active = document.getElementById('editClientActive').checked;
+  const btn    = document.getElementById('editClientSaveBtn');
+  if (!name) { showToast('⚠️', 'Название обязательно'); return; }
+  btn.disabled = true; btn.textContent = 'Сохраняю...';
+  try {
+    await apiFetch('/api/clients/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        name,
+        fb_account_id:     fbId   || null,
+        google_account_id: goId   || null,
+        tt_account_id:     ttId   || null,
+        amo_subdomain:     amo    || null,
+        active,
+      }),
+    });
+    showToast('✅', 'Клиент обновлён');
+    document.getElementById('editClientModal').classList.remove('active');
+    renderClientsPage();
+    loadClients();
+  } catch(e) { showToast('❌', e.message); }
+  finally { btn.disabled = false; btn.textContent = 'Сохранить'; }
+}
+
+<!-- EDIT CLIENT MODAL -->
+<div class="modal-overlay" id="editClientModal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-title">✏️ Редактировать клиента</div>
+    <input type="hidden" id="editClientId"/>
+    <div class="form-field">
+      <label class="form-label">Название *</label>
+      <input class="form-input" id="editClientName" autocomplete="off"/>
+    </div>
+    <div class="form-field">
+      <label class="form-label">📘 Facebook Account ID</label>
+      <input class="form-input" id="editClientFbId" placeholder="887539630709017" autocomplete="off"/>
+    </div>
+    <div class="form-field">
+      <label class="form-label">🎯 Google Customer ID</label>
+      <input class="form-input" id="editClientGoogleId" placeholder="123-456-7890" autocomplete="off"/>
+    </div>
+    <div class="form-field">
+      <label class="form-label">🎵 TikTok Advertiser ID</label>
+      <input class="form-input" id="editClientTtId" placeholder="7012345678901234567" autocomplete="off"/>
+    </div>
+    <div class="form-field">
+      <label class="form-label">amoCRM Subdomain</label>
+      <input class="form-input" id="editClientAmo" placeholder="myagency" autocomplete="off"/>
+    </div>
+    <div class="form-field" style="display:flex;align-items:center;gap:10px">
+      <input type="checkbox" id="editClientActive" style="accent-color:var(--accent);width:16px;height:16px"/>
+      <label for="editClientActive" style="cursor:pointer;font-size:13px">Клиент активен</label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('editClientModal').classList.remove('active')">Отмена</button>
+      <button class="btn-primary" id="editClientSaveBtn" onclick="submitEditClient()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOKEN MODAL (multi-source) -->
+<div class="modal-overlay" id="manualTokenModal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-title" id="tokenModalTitle">🔑 Управление токенами</div>
+    <div class="form-field">
+      <label class="form-label">Источник</label>
+      <select class="form-input" id="tokenSource" onchange="updateTokenKeyDropdown()">
+        <option value="facebook">📘 Facebook</option>
+        <option value="tiktok">🎵 TikTok</option>
+        <option value="google">🎯 Google Ads</option>
+        <option value="amocrm">📋 amoCRM</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Сохранённый ключ</label>
+      <select class="form-input" id="tokenKeySelect">
+        <option value="">— Выбрать сохранённый ключ —</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Или вставьте токен вручную</label>
+      <input class="form-input" id="tokenValue" placeholder="Access token / Refresh token" autocomplete="off"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('manualTokenModal').classList.remove('active')">Отмена</button>
+      <button class="btn-primary" id="tokenSaveBtn" onclick="submitTokenModal()">Сохранить</button>
     </div>
   </div>
 </div>

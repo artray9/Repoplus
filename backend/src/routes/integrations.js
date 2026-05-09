@@ -3,11 +3,13 @@ const { query } = require('../db');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { dailySync } = require('../jobs/sync');
 const { syncClientFacebook } = require('../services/facebook');
+const { syncClientTikTok }   = require('../services/tiktok');
+const { syncClientGoogle }   = require('../services/google');
 
 const router = express.Router();
 router.use(authMiddleware);
 
-// GET /api/integrations/:clientId — статус интеграций клиента
+// GET /api/integrations/:clientId
 router.get('/:clientId', requireAdmin, async (req, res) => {
   try {
     const result = await query(
@@ -21,7 +23,7 @@ router.get('/:clientId', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/integrations/token — сохранить/обновить токен
+// POST /api/integrations/token
 router.post('/token', requireAdmin, async (req, res) => {
   try {
     const { client_id, source, access_token, refresh_token, expires_at } = req.body;
@@ -41,7 +43,7 @@ router.post('/token', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/integrations/sync/manual — ежедневный sync вручную
+// POST /api/integrations/sync/manual
 router.post('/sync/manual', requireAdmin, async (req, res) => {
   try {
     res.json({ ok: true, message: 'Синхронизация запущена' });
@@ -51,48 +53,53 @@ router.post('/sync/manual', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/integrations/sync/backfill — выгрузка за произвольный период
-// Body: { client_id?: uuid|null, from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }
+// POST /api/integrations/sync/backfill
+// Body: { client_id?: uuid|null, from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', sources?: ['facebook','tiktok','google'] }
 router.post('/sync/backfill', requireAdmin, async (req, res) => {
   try {
-    const { client_id, from, to } = req.body;
-    if (!from || !to) {
-      return res.status(400).json({ error: 'from и to обязательны (YYYY-MM-DD)' });
-    }
-    // Validate date format
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    const { client_id, from, to, sources } = req.body;
+    if (!from || !to) return res.status(400).json({ error: 'from и to обязательны (YYYY-MM-DD)' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to))
       return res.status(400).json({ error: 'Формат даты: YYYY-MM-DD' });
-    }
-    if (from > to) {
-      return res.status(400).json({ error: 'from должна быть раньше to' });
-    }
+    if (from > to) return res.status(400).json({ error: 'from должна быть раньше to' });
 
-    res.json({ ok: true, message: `Backfill запущен: ${from} — ${to}` });
+    const activeSources = Array.isArray(sources) && sources.length
+      ? sources
+      : ['facebook', 'tiktok', 'google'];
 
-    // Run async
+    res.json({ ok: true, message: `Backfill запущен: ${from} — ${to} (${activeSources.join(', ')})` });
+
     (async () => {
       try {
         const clientsRes = client_id
           ? await query('SELECT * FROM clients WHERE id = $1 AND active = true', [client_id])
           : await query('SELECT * FROM clients WHERE active = true');
-
         const clients = clientsRes.rows;
-        console.log(`[BACKFILL] ${from}–${to} for ${clients.length} client(s)`);
+        console.log(`[BACKFILL] ${from}–${to} sources=${activeSources.join(',')} for ${clients.length} client(s)`);
 
         for (const client of clients) {
-          try {
-            const n = await syncClientFacebook(client, from, to);
-            console.log(`[BACKFILL] ${client.name}: ${n} rows`);
-          } catch (e) {
-            console.error(`[BACKFILL] ${client.name} FB error:`, e.message);
+          if (activeSources.includes('facebook')) {
+            try {
+              const n = await syncClientFacebook(client, from, to);
+              console.log(`[BACKFILL] ${client.name} FB: ${n} rows`);
+            } catch (e) { console.error(`[BACKFILL] ${client.name} FB:`, e.message); }
           }
-          // Rate-limit buffer between clients
+          if (activeSources.includes('tiktok')) {
+            try {
+              const n = await syncClientTikTok(client, from, to);
+              console.log(`[BACKFILL] ${client.name} TT: ${n} rows`);
+            } catch (e) { console.error(`[BACKFILL] ${client.name} TT:`, e.message); }
+          }
+          if (activeSources.includes('google')) {
+            try {
+              const n = await syncClientGoogle(client, from, to);
+              console.log(`[BACKFILL] ${client.name} Google: ${n} rows`);
+            } catch (e) { console.error(`[BACKFILL] ${client.name} Google:`, e.message); }
+          }
           await new Promise(r => setTimeout(r, 1000));
         }
         console.log('[BACKFILL] Done');
-      } catch (e) {
-        console.error('[BACKFILL] Fatal:', e.message);
-      }
+      } catch (e) { console.error('[BACKFILL] Fatal:', e.message); }
     })();
   } catch (e) {
     res.status(500).json({ error: 'Ошибка сервера' });

@@ -5,22 +5,35 @@ const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const router = express.Router();
 router.use(authMiddleware);
 
-// GET /api/clients — список клиентов (с has_token для UI)
+// GET /api/clients — список клиентов с токен-статусами для FB/TT/Google
 router.get('/', async (req, res) => {
   try {
     const isAdmin = req.user.role === 'admin';
-    const sql = `
-      SELECT c.*,
-        EXISTS(
-          SELECT 1 FROM integration_tokens it
-          WHERE it.client_id = c.id AND it.source = 'facebook'
-        ) AS has_token
-      FROM clients c
-      ${isAdmin ? '' : 'WHERE c.user_id = $1'}
-      ORDER BY c.name`;
-    const result = isAdmin
-      ? await query(sql)
-      : await query(sql, [req.user.userId]);
+
+    // Viewer видит только клиентов к которым ему выдан доступ
+    let sql, params;
+    if (isAdmin) {
+      sql = `
+        SELECT c.*,
+          EXISTS(SELECT 1 FROM integration_tokens it WHERE it.client_id=c.id AND it.source='facebook') AS has_fb_token,
+          EXISTS(SELECT 1 FROM integration_tokens it WHERE it.client_id=c.id AND it.source='tiktok')   AS has_tt_token,
+          EXISTS(SELECT 1 FROM integration_tokens it WHERE it.client_id=c.id AND it.source='google')   AS has_google_token
+        FROM clients c
+        ORDER BY c.name`;
+      params = [];
+    } else {
+      sql = `
+        SELECT c.*,
+          EXISTS(SELECT 1 FROM integration_tokens it WHERE it.client_id=c.id AND it.source='facebook') AS has_fb_token,
+          EXISTS(SELECT 1 FROM integration_tokens it WHERE it.client_id=c.id AND it.source='tiktok')   AS has_tt_token,
+          EXISTS(SELECT 1 FROM integration_tokens it WHERE it.client_id=c.id AND it.source='google')   AS has_google_token
+        FROM clients c
+        JOIN client_access ca ON ca.client_id = c.id AND ca.user_id = $1
+        ORDER BY c.name`;
+      params = [req.user.userId];
+    }
+
+    const result = await query(sql, params);
     res.json(result.rows);
   } catch (e) {
     console.error('[CLIENTS GET]', e.message);

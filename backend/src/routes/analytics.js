@@ -99,4 +99,39 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/analytics/balances — балансы рекламных кабинетов
+router.get('/balances', async (req, res) => {
+  try {
+    const user = req.user;
+    let whereClause = '1=1';
+    const params = [];
+
+    if (user.role !== 'admin') {
+      // viewer видит только свои клиенты
+      const accessRes = await query(
+        'SELECT client_id FROM client_access WHERE user_id=$1',
+        [user.userId]
+      );
+      const ids = accessRes.rows.map(r => r.client_id);
+      if (!ids.length) return res.json([]);
+      params.push(ids);
+      whereClause = `ab.client_id = ANY($1)`;
+    }
+
+    const result = await query(`
+      SELECT ab.client_id, c.name AS client_name,
+             ab.source, ab.balance, ab.currency, ab.spend_cap, ab.fetched_at
+      FROM account_balances ab
+      JOIN clients c ON c.id = ab.client_id
+      WHERE ${whereClause}
+      ORDER BY c.name, ab.source
+    `, params);
+
+    res.json(result.rows);
+  } catch (e) {
+    console.error('/analytics/balances error:', e);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
 module.exports = router;
