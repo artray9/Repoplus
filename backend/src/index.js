@@ -35,7 +35,7 @@ app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
-    callback(new Error(`CORS: ${origin} не разрешён`));
+    callback(new Error(`CORS: ${origin} not allowed`));
   },
   credentials: true,
 }));
@@ -57,9 +57,24 @@ app.use('/api/users',        usersRoutes);
 app.use('/api/telegram',     telegramRoutes);
 app.use('/api/oauth',        oauthRoutes);
 
+// ── WISHES (public endpoint, no auth) ────────────────────────────
+app.post('/api/wishes', async (req, res) => {
+  const { text, email } = req.body || {};
+  if (!text) return res.status(400).json({ error: 'text required' });
+  try {
+    const { query: dbQuery } = require('./db');
+    await dbQuery(
+      `INSERT INTO wishes (text, email, created_at) VALUES ($1, $2, NOW())`,
+      [text.slice(0, 2000), email || null]
+    ).catch(() => {});
+    console.log(`[WISH] from ${email || 'anonymous'}: ${text.slice(0, 80)}`);
+  } catch(e) {}
+  res.json({ ok: true });
+});
+
 // ── CRON: 06:00 UTC+5 = 01:00 UTC ────────────────────────────────
 cron.schedule('0 1 * * *', async () => {
-  console.log('[CRON] Starting daily sync…');
+  console.log('[CRON] Starting daily sync...');
   try { await dailySync(); }
   catch (e) { console.error('[CRON] error:', e.message); }
 });
@@ -85,6 +100,7 @@ async function autoMigrate() {
         name TEXT NOT NULL,
         fb_account_id TEXT,
         google_account_id TEXT,
+        google_manager_id TEXT,
         tt_account_id TEXT,
         amo_subdomain TEXT,
         active BOOLEAN DEFAULT true,
@@ -196,8 +212,17 @@ async function autoMigrate() {
         UNIQUE(chat_id)
       )
     `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS wishes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        text TEXT NOT NULL,
+        email TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
     await client.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'`);
     await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+    await client.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS google_manager_id TEXT`);
     console.log('[MIGRATE] Auto-migration complete');
   } catch(e) {
     console.error('[MIGRATE] Auto-migration error:', e.message);
@@ -209,6 +234,6 @@ async function autoMigrate() {
 // ── START ────────────────────────────────────────────────────────
 autoMigrate().then(() => {
   app.listen(PORT, HOST, () => {
-    console.log(`🚀 Repoplus API running on ${HOST}:${PORT}`);
+    console.log(`Repoplus API running on ${HOST}:${PORT}`);
   });
 });
