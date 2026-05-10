@@ -70,7 +70,7 @@ router.patch('/:id', requireAdmin, async (req, res) => {
 
     if (name) { params.push(name); updates.push(`name=$${params.length}`); }
     if (role) {
-      const validRoles = ['admin', 'viewer'];
+      const validRoles = ['admin', 'viewer', 'pending'];
       if (!validRoles.includes(role)) {
         return res.status(400).json({ error: 'Недопустимая роль' });
       }

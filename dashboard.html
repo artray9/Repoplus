@@ -1664,6 +1664,8 @@ function showToast(icon, msg) {
     <button class="btn-primary" onclick="openAddUserModal()">+ Добавить пользователя</button>
     <button class="btn-secondary" onclick="openInviteModal()" style="margin-left:10px">📧 Пригласить клиента</button>
   </div>
+  <div id="pendingBlock"></div>
+
   <div class="table-card">
     <div style="overflow-x:auto">
       <table id="usersTable">
@@ -1830,13 +1832,45 @@ async function renderUsersPage() {
 
 function renderUsersTable(users) {
   const tbody = document.getElementById('usersBody');
-  if (!users.length) {
+
+  const pending = users.filter(u => u.role === 'pending');
+  const active  = users.filter(u => u.role !== 'pending');
+
+  // Блок заявок на активацию
+  const pendingBlock = document.getElementById('pendingBlock');
+  if (pending.length) {
+    pendingBlock.style.display = '';
+    pendingBlock.innerHTML = `
+      <div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:12px;padding:16px 20px;margin-bottom:20px">
+        <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:12px">
+          🕐 Заявки на активацию (${pending.length})
+        </div>
+        ${pending.map(u => `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid rgba(251,191,36,0.15)">
+            <div>
+              <div style="font-weight:600;font-size:14px">${escHtml(u.name || u.email)}</div>
+              <div style="color:var(--muted);font-size:12px">${escHtml(u.email)} · зарегистрирован ${u.created_at ? new Date(u.created_at).toLocaleDateString('ru') : '—'}</div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn-primary" style="padding:6px 14px;font-size:13px" onclick="activateUser('${u.id}','${escHtml(u.name || u.email)}','admin')">✅ Активировать</button>
+              <button class="btn-cancel" style="padding:6px 14px;font-size:13px" onclick="deleteUser('${u.id}','${escHtml(u.name || u.email)}')">❌ Отклонить</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+  } else {
+    pendingBlock.style.display = 'none';
+    pendingBlock.innerHTML = '';
+  }
+
+  if (!active.length) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">Нет пользователей</td></tr>';
     return;
   }
-  tbody.innerHTML = users.map(u => {
+
+  tbody.innerHTML = active.map(u => {
     const accessList = (u.client_access || []).map(a => `<span style="background:var(--bg-dark);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:11px">${a.client_name}</span>`).join(' ');
-    const roleChip = u.role === 'admin'
+    const roleChip = u.role === 'admin' || u.role === 'superadmin'
       ? '<span style="background:#6C63FF22;color:#6C63FF;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600">admin</span>'
       : '<span style="background:#10b98122;color:#10b981;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600">viewer</span>';
     const created = u.created_at ? new Date(u.created_at).toLocaleDateString('ru') : '—';
@@ -1853,6 +1887,16 @@ function renderUsersTable(users) {
       </td>
     </tr>`;
   }).join('');
+}
+
+async function activateUser(userId, userName, newRole) {
+  try {
+    await apiFetch(`/api/users/${userId}`, { method:'PATCH', body: JSON.stringify({ role: newRole }) });
+    showToast(`✅ ${userName} активирован как ${newRole}`, 'ok');
+    renderUsersPage();
+  } catch(e) {
+    showToast('❌ Ошибка активации: ' + e.message, 'error');
+  }
 }
 
 function escHtml(str) {
