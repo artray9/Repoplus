@@ -1750,7 +1750,7 @@ function showToast(icon, msg) {
 
 <!-- ADD CLIENT MODAL -->
 <div class="modal-overlay" id="addClientModal" onclick="handleModalClick(event)">
-  <div class="modal" style="max-width:520px">
+  <div class="modal" style="max-width:520px;max-height:90vh;overflow-y:auto">
     <div class="modal-title">Новый клиент</div>
     <div class="form-field">
       <label class="form-label">Название клиента *</label>
@@ -1809,7 +1809,90 @@ function showToast(icon, msg) {
   </div>
 </div>
 
+<!-- ADD SUBSCRIBER MODAL -->
+<div class="modal-overlay" id="addSubscriberModal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal">
+    <div class="modal-title">Новый подписчик</div>
+    <div class="form-field">
+      <label class="form-label">Chat ID *</label>
+      <input class="form-input" id="subChatId" placeholder="-1001234567890" autocomplete="off"/>
+      <div class="form-hint">Напишите боту /start — он пришлёт Chat ID</div>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Название чата</label>
+      <input class="form-input" id="subChatName" placeholder="Команда Repoplus" autocomplete="off"/>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Типы уведомлений</label>
+      <div id="subNotifTypes" style="display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--bg-dark);border-radius:8px;border:1px solid var(--border)"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('addSubscriberModal').classList.remove('active')">Отмена</button>
+      <button class="btn-primary" onclick="submitAddSubscriber()">Добавить</button>
+    </div>
+  </div>
+</div>
 
+<!-- TOKEN MODAL -->
+<div class="modal-overlay" id="manualTokenModal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal" style="max-width:460px;max-height:90vh;overflow-y:auto">
+    <div class="modal-title" id="tokenModalTitle">🔑 Управление токенами</div>
+    <div class="form-field">
+      <label class="form-label">Источник</label>
+      <select class="form-input" id="tokenSource" onchange="updateTokenKeyDropdown(); document.getElementById('amoSubdomainRow').style.display=this.value==='amocrm'?'block':'none'">
+        <option value="facebook">📘 Facebook</option>
+        <option value="tiktok">🎵 TikTok</option>
+        <option value="google">🎯 Google Ads</option>
+        <option value="amocrm">📋 amoCRM</option>
+      </select>
+    </div>
+    <div class="form-field" id="amoSubdomainRow" style="display:none">
+      <label class="form-label">Субдомен amoCRM</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="form-input" id="amoSubdomain" placeholder="mycompany" style="flex:1"/>
+        <span style="color:var(--text-muted);font-size:13px">.amocrm.ru</span>
+      </div>
+    </div>
+    <div class="form-field">
+      <button class="btn-primary" onclick="connectOAuth()" style="width:100%;margin-bottom:4px">🔐 Подключить через OAuth</button>
+      <div style="color:var(--text-muted);font-size:12px;text-align:center">Безопасная авторизация — без ввода токена вручную</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin:12px 0">
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+      <span style="color:var(--text-muted);font-size:12px">или вручную</span>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Сохранённый ключ</label>
+      <select class="form-input" id="tokenKeySelect">
+        <option value="">— Выбрать сохранённый ключ —</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Вставьте токен вручную</label>
+      <input class="form-input" id="tokenValue" placeholder="Access token / Refresh token" autocomplete="off"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('manualTokenModal').classList.remove('active')">Отмена</button>
+      <button class="btn-primary" id="tokenSaveBtn" onclick="submitTokenModal()">Сохранить токен</button>
+    </div>
+  </div>
+</div>
+
+<!-- ONBOARDING WIZARD -->
+<div id="onboardOverlay" class="onboard-overlay" style="display:none">
+  <div class="onboard-box">
+    <div class="onboard-steps">
+      <div class="onboard-step-dot active" id="dot0"></div>
+      <div class="onboard-step-dot" id="dot1"></div>
+      <div class="onboard-step-dot" id="dot2"></div>
+      <div class="onboard-step-dot" id="dot3"></div>
+    </div>
+    <div id="onboardContent"></div>
+  </div>
+</div>
+
+<script>
 // ══════════════════════════════════════════════════════════════
 // USERS PAGE
 // ══════════════════════════════════════════════════════════════
@@ -2303,209 +2386,7 @@ function applyViewerFilter(clients) {
   // Viewer видит только клиентов из client_access (backend уже фильтрует через /api/clients)
   return clients;
 }
-
-<!-- ADD SUBSCRIBER MODAL -->
-<div class="modal-overlay" id="addSubscriberModal" onclick="if(event.target===this)this.classList.remove('active')">
-  <div class="modal">
-    <div class="modal-title">Новый подписчик</div>
-    <div class="form-field">
-      <label class="form-label">Chat ID *</label>
-      <input class="form-input" id="subChatId" placeholder="-1001234567890" autocomplete="off"/>
-      <div class="form-hint">Получить: добавьте @userinfobot в чат, или напишите боту и проверьте updates через /api/telegram/test</div>
-    </div>
-    <div class="form-field">
-      <label class="form-label">Название чата</label>
-      <input class="form-input" id="subChatName" placeholder="Команда Repoplus" autocomplete="off"/>
-    </div>
-    <div class="form-field">
-      <label class="form-label">Типы уведомлений</label>
-      <div id="subNotifTypes" style="display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--bg-dark);border-radius:8px;border:1px solid var(--border)"></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="document.getElementById('addSubscriberModal').classList.remove('active')">Отмена</button>
-      <button class="btn-primary" onclick="submitAddSubscriber()">Добавить</button>
-    </div>
-  </div>
-</div>
-
-
-// ── EDIT CLIENT ───────────────────────────────────────────────
-function openEditClientModal(clientId) {
-  const c = CLIENTS_FULL.find(x => x.id === clientId);
-  if (!c) return;
-  document.getElementById('editClientId').value         = c.id;
-  document.getElementById('editClientName').value       = c.name;
-  document.getElementById('editClientFbId').value       = c.fb_account_id     || '';
-  document.getElementById('editClientGoogleId').value   = c.google_account_id || '';
-  document.getElementById('editClientTtId').value       = c.tt_account_id     || '';
-  document.getElementById('editClientAmo').value        = c.amo_subdomain     || '';
-  document.getElementById('editClientActive').checked   = c.active !== false;
-  document.getElementById('editClientModal').classList.add('active');
-}
-async function submitEditClient() {
-  const id     = document.getElementById('editClientId').value;
-  const name   = document.getElementById('editClientName').value.trim();
-  const fbId   = document.getElementById('editClientFbId').value.trim();
-  const goId   = document.getElementById('editClientGoogleId').value.trim().replace(/-/g,'');
-  const ttId   = document.getElementById('editClientTtId').value.trim();
-  const amo    = document.getElementById('editClientAmo').value.trim();
-  const active = document.getElementById('editClientActive').checked;
-  const btn    = document.getElementById('editClientSaveBtn');
-  if (!name) { showToast('⚠️', 'Название обязательно'); return; }
-  btn.disabled = true; btn.textContent = 'Сохраняю...';
-  try {
-    await apiFetch('/api/clients/' + id, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        name,
-        fb_account_id:     fbId   || null,
-        google_account_id: goId   || null,
-        tt_account_id:     ttId   || null,
-        amo_subdomain:     amo    || null,
-        active,
-      }),
-    });
-    showToast('✅', 'Клиент обновлён');
-    document.getElementById('editClientModal').classList.remove('active');
-    renderClientsPage();
-    loadClients();
-  } catch(e) { showToast('❌', e.message); }
-  finally { btn.disabled = false; btn.textContent = 'Сохранить'; }
-}
-
-<!-- EDIT CLIENT MODAL -->
-<div class="modal-overlay" id="editClientModal" onclick="if(event.target===this)this.classList.remove('active')">
-  <div class="modal" style="max-width:460px">
-    <div class="modal-title">✏️ Редактировать клиента</div>
-    <input type="hidden" id="editClientId"/>
-    <div class="form-field">
-      <label class="form-label">Название *</label>
-      <input class="form-input" id="editClientName" autocomplete="off"/>
-    </div>
-    <div class="form-field">
-      <label class="form-label">📘 Facebook Account ID</label>
-      <input class="form-input" id="editClientFbId" placeholder="887539630709017" autocomplete="off"/>
-    </div>
-    <div class="form-field">
-      <label class="form-label">🎯 Google Customer ID</label>
-      <input class="form-input" id="editClientGoogleId" placeholder="123-456-7890" autocomplete="off"/>
-    </div>
-    <div class="form-field">
-      <label class="form-label">🎵 TikTok Advertiser ID</label>
-      <input class="form-input" id="editClientTtId" placeholder="7012345678901234567" autocomplete="off"/>
-    </div>
-    <div class="form-field">
-      <label class="form-label">amoCRM Subdomain</label>
-      <input class="form-input" id="editClientAmo" placeholder="myagency" autocomplete="off"/>
-    </div>
-    <div class="form-field" style="display:flex;align-items:center;gap:10px">
-      <input type="checkbox" id="editClientActive" style="accent-color:var(--accent);width:16px;height:16px"/>
-      <label for="editClientActive" style="cursor:pointer;font-size:13px">Клиент активен</label>
-    </div>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="document.getElementById('editClientModal').classList.remove('active')">Отмена</button>
-      <button class="btn-primary" id="editClientSaveBtn" onclick="submitEditClient()">Сохранить</button>
-    </div>
-  </div>
-</div>
-
-<!-- INVITE MODAL -->
-<div class="modal-overlay" id="inviteModal" onclick="if(event.target===this)this.classList.remove('active')">
-  <div class="modal" style="max-width:460px">
-    <div class="modal-title">📧 Пригласить клиента</div>
-    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">
-      Клиент получит ссылку и создаст пароль. После входа увидит только свой дашборд.
-    </p>
-    <div class="form-field">
-      <label class="form-label">Email клиента</label>
-      <input class="form-input" id="inviteEmail" type="email" placeholder="client@company.kz"/>
-    </div>
-    <div class="form-field">
-      <label class="form-label">Доступ к клиенту</label>
-      <select class="form-input" id="inviteClientSel">
-        <option value="">— Выберите клиента —</option>
-      </select>
-    </div>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="document.getElementById('inviteModal').classList.remove('active')">Отмена</button>
-      <button class="btn-primary" id="inviteSendBtn" onclick="submitInvite()">Создать ссылку</button>
-    </div>
-    <div id="inviteLinkBox" style="display:none;margin-top:16px;padding:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Отправьте эту ссылку клиенту (действует 7 дней):</div>
-      <div style="display:flex;gap:8px">
-        <input class="form-input" id="inviteLinkInput" readonly style="font-size:12px;flex:1"/>
-        <button class="btn-primary" onclick="copyInviteLink()" style="white-space:nowrap">📋 Копировать</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- TOKEN MODAL (multi-source) -->
-<div class="modal-overlay" id="manualTokenModal" onclick="if(event.target===this)this.classList.remove('active')">
-  <div class="modal" style="max-width:460px">
-    <div class="modal-title" id="tokenModalTitle">🔑 Управление токенами</div>
-    <div class="form-field">
-      <label class="form-label">Источник</label>
-      <select class="form-input" id="tokenSource" onchange="updateTokenKeyDropdown(); document.getElementById('amoSubdomainRow').style.display=this.value==='amocrm'?'block':'none'">
-        <option value="facebook">📘 Facebook</option>
-        <option value="tiktok">🎵 TikTok</option>
-        <option value="google">🎯 Google Ads</option>
-        <option value="amocrm">📋 amoCRM</option>
-      </select>
-    </div>
-
-    <!-- amoCRM subdomain (только для amoCRM) -->
-    <div class="form-field" id="amoSubdomainRow" style="display:none">
-      <label class="form-label">Субдомен amoCRM</label>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input class="form-input" id="amoSubdomain" placeholder="mycompany" style="flex:1"/>
-        <span style="color:var(--text-muted);font-size:13px">.amocrm.ru</span>
-      </div>
-    </div>
-
-    <!-- OAuth кнопка -->
-    <div class="form-field">
-      <button class="btn-primary" onclick="connectOAuth()" style="width:100%;margin-bottom:4px">
-        🔐 Подключить через OAuth
-      </button>
-      <div style="color:var(--text-muted);font-size:12px;text-align:center">Безопасная авторизация — без ввода токена вручную</div>
-    </div>
-
-    <div style="display:flex;align-items:center;gap:8px;margin:12px 0">
-      <div style="flex:1;height:1px;background:var(--border)"></div>
-      <span style="color:var(--text-muted);font-size:12px">или вручную</span>
-      <div style="flex:1;height:1px;background:var(--border)"></div>
-    </div>
-
-    <div class="form-field">
-      <label class="form-label">Сохранённый ключ</label>
-      <select class="form-input" id="tokenKeySelect">
-        <option value="">— Выбрать сохранённый ключ —</option>
-      </select>
-    </div>
-    <div class="form-field">
-      <label class="form-label">Вставьте токен вручную</label>
-      <input class="form-input" id="tokenValue" placeholder="Access token / Refresh token" autocomplete="off"/>
-    </div>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="document.getElementById('manualTokenModal').classList.remove('active')">Отмена</button>
-      <button class="btn-primary" id="tokenSaveBtn" onclick="submitTokenModal()">Сохранить токен</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── ONBOARDING WIZARD ────────────────────────────────────────── -->
-<div id="onboardOverlay" class="onboard-overlay" style="display:none">
-  <div class="onboard-box">
-    <div class="onboard-steps">
-      <div class="onboard-step-dot active" id="dot0"></div>
-      <div class="onboard-step-dot" id="dot1"></div>
-      <div class="onboard-step-dot" id="dot2"></div>
-      <div class="onboard-step-dot" id="dot3"></div>
-    </div>
-    <div id="onboardContent"></div>
-  </div>
-</div>
+</script>
 
 </body>
 </html>
