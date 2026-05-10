@@ -1,26 +1,15 @@
 name: Deploy to Railway
 
+# Railway автоматически деплоит при пуше в main через GitHub интеграцию.
+# Этот workflow отключён чтобы избежать дублирования.
+
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'backend/**'
-      - '.github/workflows/deploy.yml'
+  workflow_dispatch: # только ручной запуск если нужно
 
 jobs:
-  deploy-backend:
-    name: Deploy Backend → Railway
+  # Railway деплоит автоматически — отдельный CI шаг не нужен
+  noop:
+    name: Railway auto-deploys on push
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-
-      - name: Deploy
-        working-directory: backend
-        run: railway up --service repoplus-api
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-
-  # Фронтенд деплоится на GitHub Pages автоматически (см. ниже)
+      - run: echo "Railway handles deployment automatically via GitHub integration"
