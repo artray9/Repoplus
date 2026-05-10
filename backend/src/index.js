@@ -11,6 +11,7 @@ const integrationsRoutes = require('./routes/integrations');
 const settingsRoutes     = require('./routes/settings');
 const usersRoutes        = require('./routes/users');
 const telegramRoutes     = require('./routes/telegram');
+const oauthRoutes        = require('./routes/oauth');
 const { dailySync }      = require('./jobs/sync');
 
 const app  = express();
@@ -54,6 +55,7 @@ app.use('/api/integrations', integrationsRoutes);
 app.use('/api/settings',     settingsRoutes);
 app.use('/api/users',        usersRoutes);
 app.use('/api/telegram',     telegramRoutes);
+app.use('/api/oauth',        oauthRoutes);
 
 // ── CRON: 06:00 UTC+5 = 01:00 UTC ────────────────────────────────
 cron.schedule('0 1 * * *', async () => {

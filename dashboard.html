@@ -1268,10 +1268,48 @@ function openTokenModal(clientId, clientName) {
   document.getElementById('tokenModalTitle').textContent = `🔑 Токены: ${clientName}`;
   document.getElementById('tokenSource').value   = 'facebook';
   document.getElementById('tokenValue').value    = '';
+  document.getElementById('amoSubdomainRow').style.display = 'none';
   document.getElementById('tokenKeySelect').innerHTML = '<option value="">— Выбрать сохранённый ключ —</option>';
   document.getElementById('manualTokenModal').classList.add('active');
   updateTokenKeyDropdown();
 }
+
+function connectOAuth() {
+  const source    = document.getElementById('tokenSource').value;
+  const jwtToken  = localStorage.getItem('accessToken') || localStorage.getItem('token') || '';
+  const baseUrl   = typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : '';
+
+  if (source === 'amocrm') {
+    const subdomain = document.getElementById('amoSubdomain').value.trim();
+    if (!subdomain) { showToast('⚠️', 'Введите субдомен amoCRM'); return; }
+    const url = `${baseUrl}/api/oauth/amocrm/init?client_id=${_tokenClientId}&subdomain=${encodeURIComponent(subdomain)}&token=${encodeURIComponent(jwtToken)}`;
+    window.location.href = url;
+    return;
+  }
+
+  const url = `${baseUrl}/api/oauth/${source}/init?client_id=${_tokenClientId}&token=${encodeURIComponent(jwtToken)}`;
+  window.location.href = url;
+}
+
+// Обработка oauth_success / oauth_error после редиректа
+(function handleOAuthResult() {
+  const params = new URLSearchParams(window.location.search);
+  const success = params.get('oauth_success');
+  const error   = params.get('oauth_error');
+  if (success) {
+    const names = { facebook:'Facebook', google:'Google Ads', tiktok:'TikTok', amocrm:'amoCRM' };
+    showToast('✅', `${names[success] || success} успешно подключён!`);
+    // Убираем параметр из URL
+    const clean = window.location.pathname;
+    window.history.replaceState({}, '', clean);
+  }
+  if (error) {
+    const names = { facebook:'Facebook', google:'Google Ads', tiktok:'TikTok', amocrm:'amoCRM' };
+    showToast('❌', `Ошибка подключения ${names[error] || error}`);
+    const clean = window.location.pathname;
+    window.history.replaceState({}, '', clean);
+  }
+})();
 async function updateTokenKeyDropdown() {
   const source = document.getElementById('tokenSource').value;
   try {
@@ -2126,17 +2164,41 @@ async function submitEditClient() {
 
 <!-- TOKEN MODAL (multi-source) -->
 <div class="modal-overlay" id="manualTokenModal" onclick="if(event.target===this)this.classList.remove('active')">
-  <div class="modal" style="max-width:440px">
+  <div class="modal" style="max-width:460px">
     <div class="modal-title" id="tokenModalTitle">🔑 Управление токенами</div>
     <div class="form-field">
       <label class="form-label">Источник</label>
-      <select class="form-input" id="tokenSource" onchange="updateTokenKeyDropdown()">
+      <select class="form-input" id="tokenSource" onchange="updateTokenKeyDropdown(); document.getElementById('amoSubdomainRow').style.display=this.value==='amocrm'?'block':'none'">
         <option value="facebook">📘 Facebook</option>
         <option value="tiktok">🎵 TikTok</option>
         <option value="google">🎯 Google Ads</option>
         <option value="amocrm">📋 amoCRM</option>
       </select>
     </div>
+
+    <!-- amoCRM subdomain (только для amoCRM) -->
+    <div class="form-field" id="amoSubdomainRow" style="display:none">
+      <label class="form-label">Субдомен amoCRM</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="form-input" id="amoSubdomain" placeholder="mycompany" style="flex:1"/>
+        <span style="color:var(--text-muted);font-size:13px">.amocrm.ru</span>
+      </div>
+    </div>
+
+    <!-- OAuth кнопка -->
+    <div class="form-field">
+      <button class="btn-primary" onclick="connectOAuth()" style="width:100%;margin-bottom:4px">
+        🔐 Подключить через OAuth
+      </button>
+      <div style="color:var(--text-muted);font-size:12px;text-align:center">Безопасная авторизация — без ввода токена вручную</div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:8px;margin:12px 0">
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+      <span style="color:var(--text-muted);font-size:12px">или вручную</span>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+    </div>
+
     <div class="form-field">
       <label class="form-label">Сохранённый ключ</label>
       <select class="form-input" id="tokenKeySelect">
@@ -2144,12 +2206,12 @@ async function submitEditClient() {
       </select>
     </div>
     <div class="form-field">
-      <label class="form-label">Или вставьте токен вручную</label>
+      <label class="form-label">Вставьте токен вручную</label>
       <input class="form-input" id="tokenValue" placeholder="Access token / Refresh token" autocomplete="off"/>
     </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="document.getElementById('manualTokenModal').classList.remove('active')">Отмена</button>
-      <button class="btn-primary" id="tokenSaveBtn" onclick="submitTokenModal()">Сохранить</button>
+      <button class="btn-primary" id="tokenSaveBtn" onclick="submitTokenModal()">Сохранить токен</button>
     </div>
   </div>
 </div>
