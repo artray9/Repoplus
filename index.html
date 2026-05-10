@@ -35,7 +35,10 @@
     }
     .logo { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
     .logo span { color: var(--accent); }
-    .nav-links { display: flex; gap: 32px; }
+    .nav-links {
+      display: flex; gap: 32px;
+      position: absolute; left: 50%; transform: translateX(-50%);
+    }
     .nav-links a { color: var(--sub); text-decoration: none; font-size: 14px; font-weight: 500; transition: color .2s; }
     .nav-links a:hover { color: var(--text); }
     .nav-cta { display: flex; gap: 12px; align-items: center; }
@@ -366,7 +369,7 @@
     <div>
       <div class="section-label">Метрики</div>
       <h2 class="section-title">Все нужные показатели под рукой</h2>
-      <p class="section-sub">Из ваших Apps Script мы взяли всё лучшее и сделали это красивым интерфейсом.</p>
+      <p class="section-sub">Всё что нужно агентству — в одном месте, с красивым интерфейсом.</p>
     </div>
     <div class="metrics-list">
       <div class="metric-row">
@@ -471,4 +474,95 @@
 <footer>
   <div class="logo">repo<span style="color:var(--accent)">plus</span></div>
   <div class="footer-links">
-    <a href=
+    <a href="dashboard.html">Дашборд</a>
+    <a href="mailto:info@repoplus.kz">info@repoplus.kz</a>
+    <a href="#" onclick="openWishModal();return false">💡 Пожелания</a>
+    <a href="#">Политика</a>
+  </div>
+  <div>© 2025 Repoplus. Казахстан.</div>
+</footer>
+
+<!-- Floating wish button -->
+<button onclick="openWishModal()" style="
+  position:fixed;bottom:28px;right:28px;z-index:999;
+  background:var(--accent);color:#fff;border:none;
+  border-radius:50px;padding:13px 22px;font-size:15px;
+  font-weight:600;cursor:pointer;box-shadow:0 4px 20px rgba(99,102,241,.45);
+  display:flex;align-items:center;gap:8px;transition:transform .15s;
+" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+  💡 Предложить функцию
+</button>
+
+<!-- WISH MODAL -->
+<div id="wishModal" onclick="if(event.target===this)closeWishModal()" style="
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);
+  z-index:1000;align-items:center;justify-content:center;
+">
+  <div style="
+    background:#1e1e2e;border:1px solid #2a2a3e;border-radius:16px;
+    padding:32px;max-width:480px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.5);
+  ">
+    <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:6px">💡 Предложить функцию</div>
+    <div style="color:#8888aa;font-size:14px;margin-bottom:20px">Расскажите какой сервис или функцию вы хотели бы видеть в Repoplus</div>
+
+    <div style="margin-bottom:14px">
+      <input id="wishEmail" type="email" placeholder="Ваш email (необязательно)" style="
+        width:100%;padding:11px 14px;border-radius:8px;border:1px solid #2a2a3e;
+        background:#13131f;color:#fff;font-size:14px;box-sizing:border-box;
+      "/>
+    </div>
+    <div style="margin-bottom:20px">
+      <textarea id="wishText" placeholder="Опишите что вы хотите видеть в платформе..." rows="5" style="
+        width:100%;padding:11px 14px;border-radius:8px;border:1px solid #2a2a3e;
+        background:#13131f;color:#fff;font-size:14px;resize:vertical;
+        box-sizing:border-box;font-family:inherit;
+      "></textarea>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button onclick="closeWishModal()" style="
+        flex:1;padding:11px;border-radius:8px;border:1px solid #2a2a3e;
+        background:transparent;color:#8888aa;cursor:pointer;font-size:14px;
+      ">Отмена</button>
+      <button onclick="submitWish()" id="wishBtn" style="
+        flex:2;padding:11px;border-radius:8px;border:none;
+        background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600;
+      ">Отправить пожелание</button>
+    </div>
+    <div id="wishSuccess" style="display:none;text-align:center;padding:12px;color:#4ade80;font-size:14px;margin-top:8px">
+      ✅ Спасибо! Мы учтём ваше пожелание.
+    </div>
+  </div>
+</div>
+
+<script>
+function openWishModal() {
+  const m = document.getElementById('wishModal');
+  m.style.display = 'flex';
+  document.getElementById('wishSuccess').style.display = 'none';
+  document.getElementById('wishText').value = '';
+  document.getElementById('wishEmail').value = '';
+}
+function closeWishModal() {
+  document.getElementById('wishModal').style.display = 'none';
+}
+async function submitWish() {
+  const text  = document.getElementById('wishText').value.trim();
+  const email = document.getElementById('wishEmail').value.trim();
+  const btn   = document.getElementById('wishBtn');
+  if (!text) { document.getElementById('wishText').focus(); return; }
+  btn.disabled = true; btn.textContent = 'Отправляю...';
+  try {
+    await fetch('https://repoplus-production.up.railway.app/api/wishes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, email }),
+    });
+  } catch(e) {}
+  document.getElementById('wishSuccess').style.display = 'block';
+  btn.style.display = 'none';
+  setTimeout(closeWishModal, 2500);
+}
+</script>
+
+</body>
+</html>

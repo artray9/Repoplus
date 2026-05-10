@@ -19,20 +19,40 @@ router.get('/', async (req, res) => {
     const { client_id = 'all', from, to, source = 'all', group_by = 'day' } = req.query;
     const user = req.user;
 
-    // Клиенты видят только свои данные
-    let clientFilter = client_id;
-    if (user.role === 'client') {
-      const clientRes = await query('SELECT id FROM clients WHERE user_id = $1', [user.userId]);
-      if (!clientRes.rows.length) return res.json({ kpi: {}, timeseries: [], campaigns: [] });
-      clientFilter = clientRes.rows[0].id;
+    // Изоляция данных по ролям
+    let allowedClientIds = null; // null = все (superadmin)
+
+    if (user.role === 'viewer') {
+      // Viewer видит только назначенных клиентов
+      const accessRes = await query(
+        'SELECT client_id FROM client_access WHERE user_id = $1', [user.userId]
+      );
+      allowedClientIds = accessRes.rows.map(r => r.client_id);
+      if (!allowedClientIds.length) return res.json({ kpi: {}, timeseries: [], campaigns: [] });
+    } else if (user.role === 'admin') {
+      // Admin видит только своих клиентов
+      const ownRes = await query(
+        'SELECT id FROM clients WHERE owner_id = $1 OR owner_id IS NULL', [user.userId]
+      );
+      allowedClientIds = ownRes.rows.map(r => r.id);
+      if (!allowedClientIds.length) return res.json({ kpi: {}, timeseries: [], campaigns: [] });
     }
+    // superadmin: allowedClientIds = null → без ограничений
 
     const params = [];
     let where = ['1=1'];
 
-    if (clientFilter !== 'all') {
-      params.push(clientFilter);
+    // Если указан конкретный client_id — проверяем доступ
+    if (client_id !== 'all') {
+      if (allowedClientIds && !allowedClientIds.includes(client_id)) {
+        return res.json({ kpi: {}, timeseries: [], campaigns: [] });
+      }
+      params.push(client_id);
       where.push(`client_id = $${params.length}`);
+    } else if (allowedClientIds) {
+      // Фильтр по списку разрешённых клиентов
+      params.push(allowedClientIds);
+      where.push(`client_id = ANY($${params.length})`);
     }
     if (from) { params.push(from); where.push(`date >= $${params.length}`); }
     if (to)   { params.push(to);   where.push(`date <= $${params.length}`); }
@@ -106,17 +126,26 @@ router.get('/balances', async (req, res) => {
     let whereClause = '1=1';
     const params = [];
 
-    if (user.role !== 'admin') {
-      // viewer видит только свои клиенты
+    if (user.role === 'viewer') {
+      // Viewer видит только назначенных клиентов
       const accessRes = await query(
-        'SELECT client_id FROM client_access WHERE user_id=$1',
-        [user.userId]
+        'SELECT client_id FROM client_access WHERE user_id=$1', [user.userId]
       );
       const ids = accessRes.rows.map(r => r.client_id);
       if (!ids.length) return res.json([]);
       params.push(ids);
-      whereClause = `ab.client_id = ANY($1)`;
+      whereClause = `ab.client_id = ANY($${params.length})`;
+    } else if (user.role === 'admin') {
+      // Admin видит только своих клиентов (owner_id)
+      const ownRes = await query(
+        'SELECT id FROM clients WHERE owner_id = $1 OR owner_id IS NULL', [user.userId]
+      );
+      const ids = ownRes.rows.map(r => r.id);
+      if (!ids.length) return res.json([]);
+      params.push(ids);
+      whereClause = `ab.client_id = ANY($${params.length})`;
     }
+    // superadmin: whereClause = '1=1' → видит всё
 
     const result = await query(`
       SELECT ab.client_id, c.name AS client_name,

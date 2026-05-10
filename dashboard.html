@@ -249,6 +249,30 @@
     .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
     .btn-cancel { padding: 10px 20px; background: transparent; color: var(--sub); border: 1px solid var(--border); border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
     .btn-cancel:hover { border-color: rgba(255,255,255,0.2); color: var(--text); }
+    .btn-ghost { padding: 7px 14px; background: transparent; color: var(--sub); border: 1px solid var(--border); border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: all .2s; white-space: nowrap; }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ONBOARDING WIZARD */
+    .onboard-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center; }
+    .onboard-box { background:var(--card);border:1px solid var(--border);border-radius:20px;padding:40px;max-width:520px;width:90%;text-align:center; }
+    .onboard-steps { display:flex;gap:6px;justify-content:center;margin-bottom:32px; }
+    .onboard-step-dot { width:8px;height:8px;border-radius:50%;background:var(--border);transition:background .3s; }
+    .onboard-step-dot.active { background:var(--accent); }
+    .onboard-step-dot.done { background:#4ade80; }
+    .onboard-icon { font-size:52px;margin-bottom:16px; }
+    .onboard-title { font-size:22px;font-weight:800;margin-bottom:10px; }
+    .onboard-sub { color:var(--sub);font-size:15px;margin-bottom:28px;line-height:1.6; }
+    .onboard-actions { display:flex;gap:12px;justify-content:center; }
+
+    /* PRINT */
+    @media print {
+      .sidebar,.topbar,.kpi-grid,.charts-row,.alerts-col,.table-actions,.source-tabs,
+      .filters-row,.page-header,.btn-ghost,.btn-primary { display:none!important; }
+      .main { margin:0!important; }
+      .table-card { box-shadow:none;border:1px solid #ccc; }
+      body { background:#fff!important;color:#000!important; }
+      table th,table td { color:#000!important;border-color:#ccc!important; }
+    }
 
     /* ── CLIENTS TABLE ── */
     .token-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 5px; font-size: 11px; font-weight: 600; }
@@ -412,6 +436,8 @@
               <option value="cpl">По CPL</option>
               <option value="ctr">По CTR</option>
             </select>
+            <button class="btn-ghost" onclick="exportCSV()" title="Скачать CSV">📥 CSV</button>
+            <button class="btn-ghost" onclick="exportPDF()" title="Печать / PDF">🖨 PDF</button>
           </div>
         </div>
         <div style="overflow-x:auto">
@@ -697,6 +723,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await loadClients();
   await loadRealData();
+  maybeShowOnboard();
 });
 
 async function loadClients() {
@@ -1023,6 +1050,137 @@ function renderTable() {
 function filterTable() { renderTable(); }
 function sortBy(field) { sortField = field; sortDir *= -1; renderTable(); }
 function sortTable() { sortField = document.getElementById('sortSelect').value; sortDir = -1; renderTable(); }
+
+// ── EXPORT ────────────────────────────────────────────────────────
+function exportCSV() {
+  const camps = getFilteredCamps();
+  if (!camps.length) { showToast('Нет данных для экспорта', 'warn'); return; }
+
+  const from = document.getElementById('dateFrom').value;
+  const to   = document.getElementById('dateTo').value;
+  const clientName = activeClient === 'all'
+    ? 'все клиенты'
+    : (CLIENTS.find(c => c.id === activeClient)?.name || '');
+
+  const header = ['Источник','Кампания','Расход $','Показы','Клики','Лиды','CPL $','CTR %','CPM $'];
+  const rows = camps.map(c => [
+    c.source, `"${c.name.replace(/"/g,'""')}"`,
+    c.spend.toFixed(2), c.imp, c.clicks, c.leads,
+    c.cpl > 0 ? c.cpl.toFixed(2) : '0',
+    c.ctr > 0 ? c.ctr.toFixed(3) : '0',
+    c.cpm > 0 ? c.cpm.toFixed(2) : '0',
+  ]);
+
+  let csv = `﻿`; // BOM for Excel UTF-8
+  csv += `# Repoplus Analytics | ${clientName} | ${from} — ${to}\n`;
+  csv += header.join(';') + '\n';
+  csv += rows.map(r => r.join(';')).join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `repoplus_${from}_${to}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('CSV скачан', 'ok');
+}
+
+function exportPDF() {
+  // Показываем только таблицу кампаний при печати (print CSS скроет лишнее)
+  const title = document.title;
+  const from  = document.getElementById('dateFrom').value;
+  const to    = document.getElementById('dateTo').value;
+  document.title = `Repoplus Analytics ${from} — ${to}`;
+  window.print();
+  document.title = title;
+}
+
+// ── ONBOARDING ────────────────────────────────────────────────────
+const ONBOARD_STEPS = [
+  {
+    icon: '👋',
+    title: 'Добро пожаловать в Repoplus!',
+    sub: 'Это ваша платформа для аналитики рекламных кампаний. Давайте настроим всё за пару минут.',
+    btn: 'Начать настройку →',
+    skip: true,
+  },
+  {
+    icon: '👥',
+    title: 'Добавьте первого клиента',
+    sub: 'Создайте карточку клиента — агентство, бренд или ваш собственный аккаунт. Клиент — это контейнер для всех рекламных аккаунтов.',
+    btn: 'Добавить клиента',
+    action: () => {
+      closeOnboard();
+      showPage('clients');
+      setTimeout(() => openAddClientModal(), 300);
+    },
+    skip: true,
+  },
+  {
+    icon: '🔗',
+    title: 'Подключите рекламный кабинет',
+    sub: 'Выберите клиента, нажмите «Подключить интеграцию» и авторизуйтесь через OAuth — Facebook, Google или TikTok.',
+    btn: 'Перейти к интеграциям',
+    action: () => {
+      closeOnboard();
+      showPage('integrations');
+    },
+    skip: true,
+  },
+  {
+    icon: '🚀',
+    title: 'Всё готово!',
+    sub: 'После первой синхронизации данные появятся на дашборде. Синхронизация запускается автоматически каждую ночь или вручную кнопкой «Синхронизировать».',
+    btn: 'Открыть дашборд',
+    skip: false,
+  },
+];
+
+let onboardStep = 0;
+
+function renderOnboardStep() {
+  const s = ONBOARD_STEPS[onboardStep];
+  // dots
+  ONBOARD_STEPS.forEach((_, i) => {
+    const dot = document.getElementById('dot' + i);
+    dot.className = 'onboard-step-dot' + (i < onboardStep ? ' done' : i === onboardStep ? ' active' : '');
+  });
+  document.getElementById('onboardContent').innerHTML = `
+    <div class="onboard-icon">${s.icon}</div>
+    <div class="onboard-title">${s.title}</div>
+    <div class="onboard-sub">${s.sub}</div>
+    <div class="onboard-actions">
+      ${s.skip ? `<button class="btn-cancel" onclick="closeOnboard()">Пропустить</button>` : ''}
+      <button class="btn-primary" onclick="onboardNext()">${s.btn}</button>
+    </div>
+  `;
+}
+
+function onboardNext() {
+  const s = ONBOARD_STEPS[onboardStep];
+  if (s.action) { s.action(); return; }
+  if (onboardStep < ONBOARD_STEPS.length - 1) {
+    onboardStep++;
+    renderOnboardStep();
+  } else {
+    closeOnboard();
+  }
+}
+
+function closeOnboard() {
+  document.getElementById('onboardOverlay').style.display = 'none';
+  localStorage.setItem('rp_onboarded', '1');
+}
+
+function maybeShowOnboard() {
+  if (localStorage.getItem('rp_onboarded')) return;
+  // Показываем только если нет клиентов
+  if (CLIENTS.length > 0) { localStorage.setItem('rp_onboarded','1'); return; }
+  onboardStep = 0;
+  renderOnboardStep();
+  document.getElementById('onboardOverlay').style.display = 'flex';
+}
 
 // ── CONTROLS ──────────────────────────────────────────────────────
 function setSource(src, el) {
@@ -2289,6 +2447,19 @@ async function submitEditClient() {
       <button class="btn-cancel" onclick="document.getElementById('manualTokenModal').classList.remove('active')">Отмена</button>
       <button class="btn-primary" id="tokenSaveBtn" onclick="submitTokenModal()">Сохранить токен</button>
     </div>
+  </div>
+</div>
+
+<!-- ── ONBOARDING WIZARD ────────────────────────────────────────── -->
+<div id="onboardOverlay" class="onboard-overlay" style="display:none">
+  <div class="onboard-box">
+    <div class="onboard-steps">
+      <div class="onboard-step-dot active" id="dot0"></div>
+      <div class="onboard-step-dot" id="dot1"></div>
+      <div class="onboard-step-dot" id="dot2"></div>
+      <div class="onboard-step-dot" id="dot3"></div>
+    </div>
+    <div id="onboardContent"></div>
   </div>
 </div>
 
