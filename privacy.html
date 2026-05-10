@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Repoplus — Политика конфиденциальности</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg: #0F172A; --card: #1E293B; --border: rgba(255,255,255,0.08); --accent: #6C63FF; --text: #F1F5F9; --sub: #94A3B8; }
+    body { font-family: "Inter", sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; padding: 0; }
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(15,23,42,0.95); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 32px; display: flex; align-items: center; gap: 16px;
+    }
+    .logo { font-size: 20px; font-weight: 800; text-decoration: none; color: var(--text); }
+    .logo span { color: var(--accent); }
+    nav a.back { font-size: 14px; color: var(--sub); text-decoration: none; margin-left: auto; }
+    nav a.back:hover { color: var(--text); }
+    .hero { background: linear-gradient(135deg, rgba(108,99,255,0.15) 0%, transparent 60%); padding: 60px 32px 40px; text-align: center; border-bottom: 1px solid var(--border); }
+    .hero h1 { font-size: 36px; font-weight: 800; margin-bottom: 12px; }
+    .hero p { color: var(--sub); font-size: 15px; }
+    .container { max-width: 820px; margin: 0 auto; padding: 48px 32px 80px; }
+    h2 { font-size: 20px; font-weight: 700; margin: 36px 0 12px; padding-top: 8px; border-top: 1px solid var(--border); }
+    h2:first-child { border-top: none; margin-top: 0; }
+    p { color: var(--sub); margin-bottom: 14px; font-size: 15px; }
+    ul { color: var(--sub); margin: 0 0 14px 20px; font-size: 15px; }
+    ul li { margin-bottom: 6px; }
+    .highlight { background: rgba(108,99,255,0.1); border: 1px solid rgba(108,99,255,0.25); border-radius: 10px; padding: 16px 20px; margin: 20px 0; }
+    .highlight p { margin: 0; color: var(--text); }
+    .updated { display: inline-block; background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 6px 16px; font-size: 13px; color: var(--sub); margin-top: 8px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    footer { text-align: center; padding: 32px; border-top: 1px solid var(--border); color: var(--sub); font-size: 14px; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="logo">repo<span>plus</span></a>
+  <a href="index.html" class="back">← На главную</a>
+</nav>
+
+<div class="hero">
+  <h1>Политика конфиденциальности</h1>
+  <p>Как мы собираем, используем и защищаем ваши данные</p>
+  <span class="updated">Обновлено: май 2025</span>
+</div>
+
+<div class="container">
+
+  <h2>1. Общие положения</h2>
+  <p>Repoplus (далее — «Платформа», «мы», «нас») — аналитический сервис для маркетинговых агентств и рекламодателей. Настоящая Политика конфиденциальности описывает, как мы собираем, используем и защищаем персональные данные пользователей при работе с платформой repoplus.kz.</p>
+  <p>Используя нашу платформу, вы соглашаетесь с условиями данной политики.</p>
+
+  <h2>2. Какие данные мы собираем</h2>
+  <p><strong>Данные аккаунта:</strong></p>
+  <ul>
+    <li>Email адрес и зашифрованный пароль</li>
+    <li>Имя пользователя и название компании</li>
+    <li>Дата регистрации и последнего входа</li>
+  </ul>
+  <p><strong>Данные рекламных платформ (через OAuth):</strong></p>
+  <ul>
+    <li>Метрики рекламных кампаний (показы, клики, расходы, лиды)</li>
+    <li>Идентификаторы рекламных аккаунтов</li>
+    <li>OAuth токены доступа (хранятся в зашифрованном виде)</li>
+  </ul>
+  <p><strong>Технические данные:</strong></p>
+  <ul>
+    <li>IP-адрес при авторизации (для защиты от брутфорса)</li>
+    <li>Логи запросов к API (без персональных данных)</li>
+  </ul>
+
+  <h2>3. Как мы используем данные</h2>
+  <ul>
+    <li>Отображение аналитики рекламных кампаний в дашборде</li>
+    <li>Отправка уведомлений через Telegram (только с вашего согласия)</li>
+    <li>Улучшение работы платформы</li>
+    <li>Обеспечение безопасности аккаунтов</li>
+  </ul>
+  <div class="highlight">
+    <p>🔒 Мы <strong>не продаём</strong> ваши данные третьим лицам и не используем их для рекламы.</p>
+  </div>
+
+  <h2>4. Доступ к данным рекламных платформ</h2>
+  <p>Repoplus подключается к Facebook Marketing API, Google Ads API, TikTok Marketing API и amoCRM через стандартный протокол OAuth 2.0. Мы запрашиваем только минимально необходимые разрешения:</p>
+  <ul>
+    <li><strong>Facebook / Instagram:</strong> чтение метрик рекламных кампаний (<code>ads_read</code>)</li>
+    <li><strong>Google Ads:</strong> чтение данных аккаунта (<code>adwords readonly</code>)</li>
+    <li><strong>TikTok Ads:</strong> чтение аналитики кампаний</li>
+    <li><strong>amoCRM:</strong> чтение данных по лидам</li>
+  </ul>
+  <p>Мы не создаём, не изменяем и не удаляем рекламные кампании от вашего имени.</p>
+
+  <h2>5. Хранение и защита данных</h2>
+  <ul>
+    <li>Данные хранятся в защищённой PostgreSQL базе данных на серверах Railway (США, регион US East)</li>
+    <li>Все соединения используют шифрование TLS/SSL</li>
+    <li>Пароли хэшируются алгоритмом bcrypt (12 раундов)</li>
+    <li>OAuth токены хранятся в зашифрованном виде</li>
+    <li>Доступ к данным ограничен только авторизованным пользователям</li>
+  </ul>
+
+  <h2>6. Передача данных третьим лицам</h2>
+  <p>Мы используем следующих технических партнёров:</p>
+  <ul>
+    <li><strong>Railway</strong> — хостинг бэкенда и базы данных</li>
+    <li><strong>GitHub Pages</strong> — хостинг фронтенда</li>
+    <li><strong>Telegram</strong> — отправка уведомлений (только если вы подключили)</li>
+  </ul>
+  <p>Эти сервисы обрабатывают данные в соответствии со своими политиками конфиденциальности. Мы не передаём ваши данные иным третьим лицам.</p>
+
+  <h2>7. Ваши права</h2>
+  <ul>
+    <li>Запросить копию ваших данных</li>
+    <li>Запросить удаление аккаунта и всех связанных данных</li>
+    <li>Отозвать доступ к рекламным платформам в любое время</li>
+    <li>Отписаться от Telegram уведомлений</li>
+  </ul>
+  <p>Для реализации прав напишите нам: <a href="mailto:info@repoplus.kz">info@repoplus.kz</a></p>
+
+  <h2>8. Удаление данных</h2>
+  <p>Вы можете запросить полное удаление ваших данных, написав на <a href="mailto:info@repoplus.kz">info@repoplus.kz</a>. Данные будут удалены в течение 30 дней.</p>
+  <p>Для пользователей Facebook: вы также можете использовать стандартную функцию Facebook "Удалить активность" для отзыва разрешений, выданных нашему приложению.</p>
+
+  <h2>9. Cookies</h2>
+  <p>Платформа использует только технически необходимое хранилище браузера (localStorage) для хранения токена авторизации. Мы не используем маркетинговые или аналитические cookies.</p>
+
+  <h2>10. Изменения политики</h2>
+  <p>Мы можем обновлять данную политику. При существенных изменениях мы уведомим пользователей по email или через уведомление в платформе. Дата последнего обновления указана вверху страницы.</p>
+
+  <h2>11. Контакты</h2>
+  <p>По вопросам конфиденциальности и защиты данных:</p>
+  <ul>
+    <li>Email: <a href="mailto:info@repoplus.kz">info@repoplus.kz</a></li>
+    <li>Сайт: <a href="https://repoplus.kz">repoplus.kz</a></li>
+    <li>Казахстан</li>
+  </ul>
+
+</div>
+
+<footer>
+  © 2025 Repoplus. Казахстан. · <a href="index.html">На главную</a>
+</footer>
+
+</body>
+</html>
