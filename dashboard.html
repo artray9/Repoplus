@@ -1504,6 +1504,7 @@ function showToast(icon, msg) {
   <div class="page-header">
     <div class="page-title">👤 Пользователи</div>
     <button class="btn-primary" onclick="openAddUserModal()">+ Добавить пользователя</button>
+    <button class="btn-secondary" onclick="openInviteModal()" style="margin-left:10px">📧 Пригласить клиента</button>
   </div>
   <div class="table-card">
     <div style="overflow-x:auto">
@@ -1813,6 +1814,50 @@ async function deleteUser(userId, name) {
 async function openAccessModal(userId, name) {
   // Shortcut: open edit modal already filtered to that user
   openEditUserModal(userId);
+}
+
+// ── INVITE MODAL ──────────────────────────────────────────────
+let _inviteClients = [];
+async function openInviteModal() {
+  document.getElementById('inviteEmail').value = '';
+  document.getElementById('inviteClientSel').innerHTML = '<option value="">— Выберите клиента —</option>';
+  document.getElementById('inviteLinkBox').style.display = 'none';
+  document.getElementById('inviteModal').classList.add('active');
+  try {
+    const clients = await apiFetch('/api/clients');
+    _inviteClients = clients || [];
+    const sel = document.getElementById('inviteClientSel');
+    _inviteClients.forEach(c => {
+      const o = document.createElement('option');
+      o.value = c.id; o.textContent = c.name;
+      sel.appendChild(o);
+    });
+  } catch(e) {}
+}
+
+async function submitInvite() {
+  const email    = document.getElementById('inviteEmail').value.trim();
+  const clientId = document.getElementById('inviteClientSel').value;
+  const btn      = document.getElementById('inviteSendBtn');
+  if (!email || !clientId) { showToast('⚠️', 'Укажите email и клиента'); return; }
+
+  const clientName = _inviteClients.find(c => c.id === clientId)?.name || '';
+  btn.disabled = true; btn.textContent = 'Создаю ссылку...';
+  try {
+    const data = await apiFetch('/api/auth/invite', {
+      method: 'POST',
+      body: JSON.stringify({ email, client_id: clientId, client_name: clientName }),
+    });
+    document.getElementById('inviteLinkInput').value = data.inviteUrl;
+    document.getElementById('inviteLinkBox').style.display = 'block';
+    showToast('✅', 'Ссылка-приглашение создана!');
+  } catch(e) { showToast('❌', e.message); }
+  finally { btn.disabled = false; btn.textContent = 'Создать ссылку'; }
+}
+
+function copyInviteLink() {
+  const val = document.getElementById('inviteLinkInput').value;
+  navigator.clipboard.writeText(val).then(() => showToast('📋', 'Скопировано!'));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2158,6 +2203,37 @@ async function submitEditClient() {
     <div class="modal-actions">
       <button class="btn-cancel" onclick="document.getElementById('editClientModal').classList.remove('active')">Отмена</button>
       <button class="btn-primary" id="editClientSaveBtn" onclick="submitEditClient()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- INVITE MODAL -->
+<div class="modal-overlay" id="inviteModal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-title">📧 Пригласить клиента</div>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">
+      Клиент получит ссылку и создаст пароль. После входа увидит только свой дашборд.
+    </p>
+    <div class="form-field">
+      <label class="form-label">Email клиента</label>
+      <input class="form-input" id="inviteEmail" type="email" placeholder="client@company.kz"/>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Доступ к клиенту</label>
+      <select class="form-input" id="inviteClientSel">
+        <option value="">— Выберите клиента —</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('inviteModal').classList.remove('active')">Отмена</button>
+      <button class="btn-primary" id="inviteSendBtn" onclick="submitInvite()">Создать ссылку</button>
+    </div>
+    <div id="inviteLinkBox" style="display:none;margin-top:16px;padding:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Отправьте эту ссылку клиенту (действует 7 дней):</div>
+      <div style="display:flex;gap:8px">
+        <input class="form-input" id="inviteLinkInput" readonly style="font-size:12px;flex:1"/>
+        <button class="btn-primary" onclick="copyInviteLink()" style="white-space:nowrap">📋 Копировать</button>
+      </div>
     </div>
   </div>
 </div>

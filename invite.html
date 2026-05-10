@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Repoplus — Принять приглашение</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0F172A; --card: #1E293B; --border: rgba(255,255,255,0.08);
+      --accent: #6C63FF; --text: #F1F5F9; --sub: #94A3B8; --muted: #475569;
+      --red: #f87171; --green: #4ade80;
+    }
+    body {
+      font-family: "Inter", sans-serif; background: var(--bg); color: var(--text);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    body::before {
+      content: ""; position: fixed; top: -200px; left: 50%; transform: translateX(-50%);
+      width: 700px; height: 700px;
+      background: radial-gradient(circle, rgba(108,99,255,0.15) 0%, transparent 70%);
+      pointer-events: none; z-index: 0;
+    }
+    .wrap { width: 100%; max-width: 440px; position: relative; z-index: 1; }
+    .logo { text-align: center; font-size: 26px; font-weight: 800; margin-bottom: 32px; }
+    .logo span { color: var(--accent); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 40px 36px; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .subtitle { font-size: 14px; color: var(--sub); margin-bottom: 28px; }
+    .invite-info {
+      background: rgba(108,99,255,0.1); border: 1px solid rgba(108,99,255,0.3);
+      border-radius: 10px; padding: 14px 16px; margin-bottom: 24px; font-size: 14px;
+    }
+    .invite-info strong { color: var(--accent); }
+    .field { margin-bottom: 18px; }
+    label { display: block; font-size: 13px; font-weight: 500; color: var(--sub); margin-bottom: 7px; }
+    input {
+      width: 100%; background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 16px; font-size: 15px; color: var(--text);
+      font-family: inherit; outline: none; transition: border-color .2s;
+    }
+    input:focus { border-color: var(--accent); background: rgba(108,99,255,0.06); }
+    input::placeholder { color: var(--muted); }
+    .btn {
+      width: 100%; padding: 14px; border-radius: 10px; border: none; cursor: pointer;
+      font-size: 15px; font-weight: 700; font-family: inherit; transition: all .2s;
+      background: var(--accent); color: #fff;
+      box-shadow: 0 6px 24px rgba(108,99,255,0.3); margin-top: 6px;
+    }
+    .btn:hover { opacity: 0.88; transform: translateY(-1px); }
+    .btn:disabled { opacity: 0.5; cursor: default; transform: none; }
+    .error-box {
+      background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3);
+      border-radius: 10px; padding: 12px 16px; font-size: 13px; color: var(--red);
+      margin-bottom: 18px; display: none;
+    }
+    .error-box.show { display: block; }
+    .spinner {
+      width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading { text-align: center; color: var(--sub); padding: 20px 0; }
+    #formSection { display: none; }
+    #invalidSection { display: none; text-align: center; color: var(--red); padding: 20px 0; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">repo<span>plus</span></div>
+  <div class="card">
+    <div id="loading"><div class="spinner"></div><br/>Проверяю приглашение...</div>
+
+    <div id="invalidSection">
+      <div style="font-size:40px;margin-bottom:16px">❌</div>
+      <h2>Приглашение недействительно</h2>
+      <p style="color:var(--sub);margin-top:8px;font-size:14px">Ссылка устарела или уже была использована.</p>
+    </div>
+
+    <div id="formSection">
+      <h1>Вы приглашены!</h1>
+      <p class="subtitle">Создайте пароль для входа в дашборд</p>
+      <div class="invite-info" id="inviteInfo"></div>
+      <div class="error-box" id="errorBox"></div>
+      <form onsubmit="acceptInvite(event)">
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="invEmail" readonly style="opacity:0.6"/>
+        </div>
+        <div class="field">
+          <label>Ваше имя</label>
+          <input type="text" id="invName" placeholder="Иван Иванов" required/>
+        </div>
+        <div class="field">
+          <label>Придумайте пароль</label>
+          <input type="password" id="invPassword" placeholder="Минимум 8 символов" required minlength="8"/>
+        </div>
+        <div class="field">
+          <label>Повторите пароль</label>
+          <input type="password" id="invPassword2" placeholder="••••••••" required/>
+        </div>
+        <button class="btn" type="submit" id="submitBtn">Войти в дашборд</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+const API   = "https://repoplus-production.up.railway.app";
+const token = new URLSearchParams(window.location.search).get("token");
+
+async function init() {
+  if (!token) { showInvalid(); return; }
+  try {
+    const resp = await fetch(`${API}/api/auth/invite/${token}`);
+    if (!resp.ok) { showInvalid(); return; }
+    const data = await resp.json();
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("formSection").style.display = "block";
+    document.getElementById("invEmail").value = data.email;
+    document.getElementById("inviteInfo").innerHTML =
+      `Вас пригласили как клиента: <strong>${data.client_name || "Repoplus"}</strong>`;
+  } catch(e) { showInvalid(); }
+}
+
+function showInvalid() {
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("invalidSection").style.display = "block";
+}
+
+async function acceptInvite(e) {
+  e.preventDefault();
+  const name  = document.getElementById("invName").value.trim();
+  const pass  = document.getElementById("invPassword").value;
+  const pass2 = document.getElementById("invPassword2").value;
+  const btn   = document.getElementById("submitBtn");
+  const err   = document.getElementById("errorBox");
+  err.classList.remove("show");
+
+  if (pass !== pass2) { err.textContent = "Пароли не совпадают"; err.classList.add("show"); return; }
+  btn.disabled = true; btn.textContent = "Создаю аккаунт...";
+
+  try {
+    const resp = await fetch(`${API}/api/auth/invite/${token}/accept`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, password: pass }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "Ошибка");
+
+    localStorage.setItem("rp_access_token", data.accessToken);
+    localStorage.setItem("rp_refresh_token", data.refreshToken);
+    localStorage.setItem("rp_user", JSON.stringify(data.user));
+    window.location.href = "dashboard.html";
+  } catch(er) {
+    err.textContent = er.message;
+    err.classList.add("show");
+    btn.disabled = false;
+    btn.textContent = "Войти в дашборд";
+  }
+}
+
+init();
+</script>
+</body>
+</html>
