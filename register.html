@@ -156,21 +156,16 @@ async function handleRegister(e) {
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || "Ошибка регистрации");
 
-    // Автоматически логиним
-    const loginResp = await fetch(`${API}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    const loginData = await loginResp.json();
-    if (loginResp.ok) {
-      localStorage.setItem("rp_access_token", loginData.accessToken);
-      localStorage.setItem("rp_refresh_token", loginData.refreshToken);
-      localStorage.setItem("rp_user", JSON.stringify(loginData.user));
-      successBox.textContent = "Аккаунт создан! Перенаправляю...";
-      successBox.classList.add("show");
-      setTimeout(() => window.location.href = "dashboard.html", 1200);
-    }
+    // Показываем сообщение об ожидании модерации
+    document.getElementById("regForm").style.display = "none";
+    successBox.innerHTML = `
+      <div style="font-size:36px;margin-bottom:12px">🎉</div>
+      <strong>Заявка отправлена!</strong><br><br>
+      Мы активируем ваш аккаунт в течение 24 часов
+      и свяжемся с вами на <strong>${email}</strong>.<br><br>
+      <a href="index.html" style="color:#4ade80;text-decoration:none">← Вернуться на главную</a>
+    `;
+    successBox.classList.add("show");
   } catch(err) {
     errorBox.textContent = err.message;
     errorBox.classList.add("show");

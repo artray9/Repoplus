@@ -199,6 +199,7 @@ async function autoMigrate() {
     await client.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'`);
     await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
     await client.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS google_manager_id TEXT`);
+    await client.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id) ON DELETE SET NULL`);
     console.log('[MIGRATE] complete');
   } catch(e) {
     console.error('[MIGRATE] error:', e.message);
