@@ -12,6 +12,7 @@ const settingsRoutes     = require('./routes/settings');
 const usersRoutes        = require('./routes/users');
 const telegramRoutes     = require('./routes/telegram');
 const oauthRoutes        = require('./routes/oauth');
+const sourcesRoutes      = require('./routes/sources');
 const { dailySync }      = require('./jobs/sync');
 
 const app  = express();
@@ -66,6 +67,7 @@ app.use('/api/settings',     settingsRoutes);
 app.use('/api/users',        usersRoutes);
 app.use('/api/telegram',     telegramRoutes);
 app.use('/api/oauth',        oauthRoutes);
+app.use('/api/sources',      sourcesRoutes);
 
 app.post('/api/wishes', async (req, res) => {
   const { text, email } = req.body || {};
@@ -211,6 +213,18 @@ async function autoMigrate() {
       used_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(email)
+    )`);
+    await client.query(`CREATE TABLE IF NOT EXISTS user_oauth_tokens (
+      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id       UUID REFERENCES users(id) ON DELETE CASCADE,
+      source        TEXT NOT NULL,
+      access_token  TEXT NOT NULL,
+      refresh_token TEXT,
+      expires_at    TIMESTAMP,
+      extra         JSONB DEFAULT '{}',
+      created_at    TIMESTAMP DEFAULT NOW(),
+      updated_at    TIMESTAMP DEFAULT NOW(),
+      UNIQUE(user_id, source)
     )`);
     await client.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'`);
     await client.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id) ON DELETE SET NULL`);

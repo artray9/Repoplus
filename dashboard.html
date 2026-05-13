@@ -467,7 +467,24 @@
       <div id="pageClients" class="page">
         <div class="page-header">
           <div class="page-title">👥 Клиенты</div>
-          <button class="btn-primary" onclick="openAddClientModal()">+ Добавить клиента</button>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn-primary" onclick="openAddClientModal()">+ Добавить вручную</button>
+          </div>
+        </div>
+
+        <!-- ── DISCOVERY: подключение источника одним кликом ── -->
+        <div class="table-card" style="margin-bottom:20px;background:linear-gradient(135deg,rgba(108,99,255,0.08),rgba(108,99,255,0.02));border-color:rgba(108,99,255,0.3)">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;padding:4px">
+            <div>
+              <div style="font-size:15px;font-weight:700;margin-bottom:4px">🔌 Подключить рекламные кабинеты</div>
+              <div style="color:var(--sub);font-size:13px">Авторизуйтесь раз в Facebook / Google / TikTok — увидите все доступные кабинеты, выберите нужные одним кликом</div>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn-primary" onclick="connectSource('facebook')" style="background:#1877F2">📘 Facebook</button>
+              <button class="btn-primary" onclick="connectSource('google')"   style="background:#EA4335">🎯 Google Ads</button>
+              <button class="btn-primary" onclick="connectSource('tiktok')"   style="background:#111">🎵 TikTok</button>
+            </div>
+          </div>
         </div>
 
         <div class="table-card">
@@ -1472,25 +1489,121 @@ function connectOAuth() {
   window.location.href = url;
 }
 
-// Обработка oauth_success / oauth_error после редиректа
+// Обработка oauth_success / oauth_error / connected после редиректа
 (function handleOAuthResult() {
   const params = new URLSearchParams(window.location.search);
-  const success = params.get('oauth_success');
-  const error   = params.get('oauth_error');
+  const success   = params.get('oauth_success');
+  const error     = params.get('oauth_error');
+  const connected = params.get('connected'); // discovery flow
+  const names = { facebook:'Facebook', google:'Google Ads', tiktok:'TikTok', amocrm:'amoCRM' };
   if (success) {
-    const names = { facebook:'Facebook', google:'Google Ads', tiktok:'TikTok', amocrm:'amoCRM' };
     showToast('✅', `${names[success] || success} успешно подключён!`);
-    // Убираем параметр из URL
-    const clean = window.location.pathname;
-    window.history.replaceState({}, '', clean);
+    window.history.replaceState({}, '', window.location.pathname);
   }
   if (error) {
-    const names = { facebook:'Facebook', google:'Google Ads', tiktok:'TikTok', amocrm:'amoCRM' };
     showToast('❌', `Ошибка подключения ${names[error] || error}`);
-    const clean = window.location.pathname;
-    window.history.replaceState({}, '', clean);
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+  if (connected) {
+    // Discovery: только что подключился источник — открыть модалку с списком
+    window.history.replaceState({}, '', window.location.pathname);
+    setTimeout(() => openDiscoverModal(connected), 200);
   }
 })();
+
+// ── DISCOVERY FLOW ───────────────────────────────────────────
+let _discoverAccounts = [];
+let _discoverSource   = null;
+
+function connectSource(source) {
+  const jwt = localStorage.getItem('rp_access_token') || '';
+  if (!jwt) { showToast('⚠️', 'Сначала войдите'); return; }
+  window.location.href = `${API_BASE_URL}/api/oauth/${source}/connect-init?token=${encodeURIComponent(jwt)}`;
+}
+
+async function openDiscoverModal(source) {
+  _discoverSource   = source;
+  _discoverAccounts = [];
+  const names = { facebook:'Facebook Ads', google:'Google Ads', tiktok:'TikTok Ads' };
+  document.getElementById('discoverTitle').textContent  = '🔌 Выберите кабинеты — ' + (names[source] || source);
+  document.getElementById('discoverSubtitle').textContent =
+    'Отметьте кабинеты, которые хотите видеть в Repoplus. Каждый станет отдельным клиентом.';
+  document.getElementById('discoverBody').innerHTML =
+    '<div style="padding:30px;text-align:center;color:var(--muted)">⏳ Загрузка списка кабинетов…</div>';
+  document.getElementById('discoverSelectAll').checked = false;
+  document.getElementById('discoverSummary').textContent = 'Выбрано: 0';
+  document.getElementById('discoverModal').classList.add('active');
+
+  try {
+    const data = await apiFetch('/api/sources/' + source + '/accounts');
+    _discoverAccounts = data.accounts || [];
+    renderDiscoverList();
+  } catch(e) {
+    document.getElementById('discoverBody').innerHTML =
+      `<div style="padding:20px;color:var(--red)">❌ ${escHtml(e.message)}</div>` +
+      `<div style="padding:0 20px 14px;color:var(--muted);font-size:12px">Попробуйте переподключить источник кнопкой выше.</div>`;
+  }
+}
+
+function renderDiscoverList() {
+  const body = document.getElementById('discoverBody');
+  if (!_discoverAccounts.length) {
+    body.innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted)">Нет доступных кабинетов</div>';
+    return;
+  }
+  body.innerHTML = _discoverAccounts.map((a, idx) => {
+    const disabled = a.already_connected;
+    const badge = disabled
+      ? `<span style="background:#10b98122;color:#10b981;border-radius:4px;padding:2px 8px;font-size:11px;margin-left:8px">✓ Уже подключён</span>`
+      : '';
+    const meta = [a.currency, a.status, a.business_name].filter(Boolean).join(' · ');
+    return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);cursor:${disabled?'default':'pointer'};opacity:${disabled?0.5:1}">
+      <input type="checkbox" data-idx="${idx}" ${disabled?'disabled':''} onchange="discoverCountSelected()" style="accent-color:var(--accent);width:18px;height:18px;flex-shrink:0"/>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(a.name)}${badge}</div>
+        <div style="font-size:11px;color:var(--muted);font-family:monospace">ID: ${escHtml(a.id)}${meta ? ' · ' + escHtml(meta) : ''}</div>
+      </div>
+    </label>`;
+  }).join('');
+  discoverCountSelected();
+}
+
+function discoverToggleAll(checked) {
+  document.querySelectorAll('#discoverBody input[type=checkbox]:not(:disabled)').forEach(cb => { cb.checked = checked; });
+  discoverCountSelected();
+}
+
+function discoverCountSelected() {
+  const checked = document.querySelectorAll('#discoverBody input[type=checkbox]:checked').length;
+  document.getElementById('discoverSummary').textContent = 'Выбрано: ' + checked;
+}
+
+async function submitDiscoverAccounts() {
+  const checkboxes = [...document.querySelectorAll('#discoverBody input[type=checkbox]:checked')];
+  if (!checkboxes.length) { showToast('⚠️', 'Выберите хотя бы один кабинет'); return; }
+  const selected = checkboxes.map(cb => _discoverAccounts[parseInt(cb.dataset.idx, 10)]).filter(Boolean);
+
+  const btn = document.getElementById('discoverSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Добавляю...';
+  try {
+    const r = await apiFetch('/api/clients/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ source: _discoverSource, accounts: selected }),
+    });
+    const created = (r.created || []).length;
+    const skipped = (r.skipped || []).length;
+    let msg = '✅ Добавлено: ' + created;
+    if (skipped) msg += ', пропущено: ' + skipped;
+    showToast('✅', msg);
+    document.getElementById('discoverModal').classList.remove('active');
+    if (typeof renderClientsPage === 'function') renderClientsPage();
+    if (typeof loadClients      === 'function') loadClients();
+  } catch(e) {
+    showToast('❌', e.message || 'Ошибка');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Добавить выбранные';
+  }
+}
 async function updateTokenKeyDropdown() {
   const source = document.getElementById('tokenSource').value;
   try {
@@ -1908,6 +2021,28 @@ function showToast(icon, msg) {
   </div>
 </div>
 
+<!-- DISCOVER ACCOUNTS MODAL -->
+<div class="modal-overlay" id="discoverModal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal" style="max-width:680px;max-height:85vh;display:flex;flex-direction:column">
+    <div class="modal-title" id="discoverTitle">🔌 Выберите рекламные кабинеты</div>
+    <div id="discoverSubtitle" style="color:var(--sub);font-size:13px;margin-bottom:14px"></div>
+    <div id="discoverBody" style="overflow-y:auto;flex:1;border:1px solid var(--border);border-radius:10px;padding:6px;min-height:160px;max-height:50vh">
+      <div style="padding:30px;text-align:center;color:var(--muted)">Загрузка списка кабинетов…</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:8px">
+      <label style="font-size:13px;color:var(--sub);cursor:pointer">
+        <input type="checkbox" id="discoverSelectAll" onclick="discoverToggleAll(this.checked)" style="accent-color:var(--accent);vertical-align:middle"/>
+        Выбрать все доступные
+      </label>
+      <div id="discoverSummary" style="font-size:13px;color:var(--sub)">Выбрано: 0</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('discoverModal').classList.remove('active')">Отмена</button>
+      <button class="btn-primary" id="discoverSubmitBtn" onclick="submitDiscoverAccounts()">Добавить выбранные</button>
+    </div>
+  </div>
+</div>
+
 <!-- INVITE CLIENT MODAL -->
 <div class="modal-overlay" id="inviteModal" onclick="if(event.target===this)this.classList.remove('active')">
   <div class="modal" style="max-width:480px">
@@ -2292,7 +2427,6 @@ async function refreshBalances() {
   }
 }
 
-
 // ══════════════════════════════════════════════════════════════
 // TELEGRAM SETTINGS
 // ══════════════════════════════════════════════════════════════
@@ -2314,62 +2448,53 @@ async function renderTelegramSettings() {
       apiFetch('/api/telegram/subscribers'),
     ]);
 
-    // Bot config block
     if (cfg) {
-      block.innerHTML = `
-        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-          <div style="background:#10b98122;border:1px solid #10b981;border-radius:8px;padding:8px 16px;display:flex;align-items:center;gap:8px">
-            <span style="color:#10b981;font-size:18px">✅</span>
-            <div>
-              <div style="font-weight:600;font-size:13px">@${cfg.bot_username}</div>
-              <div style="color:var(--muted);font-size:11px">Токен: ${cfg.bot_token_preview} · ${cfg.subscriber_count} подписчик(ов)</div>
-            </div>
-          </div>
-          <button class="btn-cancel" onclick="openBotTokenModal()" style="font-size:12px">🔄 Сменить токен</button>
-        </div>`;
+      block.innerHTML = '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">' +
+        '<div style="background:#10b98122;border:1px solid #10b981;border-radius:8px;padding:8px 16px;display:flex;align-items:center;gap:8px">' +
+        '<span style="color:#10b981;font-size:18px">✅</span>' +
+        '<div>' +
+        '<div style="font-weight:600;font-size:13px">@' + cfg.bot_username + '</div>' +
+        '<div style="color:var(--muted);font-size:11px">Токен: ' + cfg.bot_token_preview + ' · ' + cfg.subscriber_count + ' подписчик(ов)</div>' +
+        '</div></div>' +
+        '<button class="btn-cancel" onclick="openBotTokenModal()" style="font-size:12px">🔄 Сменить токен</button></div>';
     } else {
-      block.innerHTML = `
-        <div style="display:flex;align-items:center;gap:12px;padding:4px 0">
-          <span style="color:var(--muted)">Бот не подключён</span>
-          <button class="btn-primary" onclick="openBotTokenModal()" style="font-size:12px;padding:6px 14px">🤖 Подключить бота</button>
-        </div>
-        <div style="margin-top:10px;font-size:12px;color:var(--muted)">
-          1. Создайте бота через <b>@BotFather</b> → /newbot<br>
-          2. Скопируйте токен<br>
-          3. Нажмите «Подключить бота» и вставьте токен<br>
-          4. Добавьте бота в нужный чат/группу и получите chat_id
-        </div>`;
+      block.innerHTML = '<div style="display:flex;align-items:center;gap:12px;padding:4px 0">' +
+        '<span style="color:var(--muted)">Бот не подключён</span>' +
+        '<button class="btn-primary" onclick="openBotTokenModal()" style="font-size:12px;padding:6px 14px">🤖 Подключить бота</button></div>' +
+        '<div style="margin-top:10px;font-size:12px;color:var(--muted)">' +
+        '1. Создайте бота через <b>@BotFather</b> → /newbot<br>' +
+        '2. Скопируйте токен<br>' +
+        '3. Нажмите «Подключить бота» и вставьте токен<br>' +
+        '4. Добавьте бота в нужный чат/группу и получите chat_id</div>';
     }
 
-    // Subscribers table
     if (!subs || !subs.length) {
       tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Нет подписчиков. Добавьте первый чат.</td></tr>';
     } else {
       tbody.innerHTML = subs.map(s => {
         const types = (s.notification_types || []).map(t => {
           const found = TG_NOTIFICATION_TYPES.find(x => x.value === t);
-          return `<span style="background:var(--bg-dark);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:10px;white-space:nowrap">${found ? found.label : t}</span>`;
+          return '<span style="background:var(--bg-dark);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:10px;white-space:nowrap">' + (found ? found.label : t) + '</span>';
         }).join(' ');
         const statusColor = s.active ? '#10b981' : '#f87171';
-        return `<tr>
-          <td><strong>${s.chat_name || '—'}</strong></td>
-          <td style="color:var(--muted);font-family:monospace;font-size:12px">${s.chat_id}</td>
-          <td style="max-width:280px">${types}</td>
-          <td><span style="color:${statusColor};font-size:12px">${s.active ? '✅ Активен' : '⏸ Пауза'}</span></td>
-          <td>
-            <button class="act-btn" onclick="testTgMessage('${s.chat_id}')" title="Тест">🔔</button>
-            <button class="act-btn" onclick="toggleSubscriber('${s.id}',${!s.active})" title="${s.active ? 'Пауза' : 'Активировать'}">${s.active ? '⏸' : '▶️'}</button>
-            <button class="act-btn" style="color:var(--red)" onclick="deleteSubscriber('${s.id}')">🗑️</button>
-          </td>
-        </tr>`;
+        return '<tr>' +
+          '<td><strong>' + (s.chat_name || '—') + '</strong></td>' +
+          '<td style="color:var(--muted);font-family:monospace;font-size:12px">' + s.chat_id + '</td>' +
+          '<td style="max-width:280px">' + types + '</td>' +
+          '<td><span style="color:' + statusColor + ';font-size:12px">' + (s.active ? '✅ Активен' : '⏸ Пауза') + '</span></td>' +
+          '<td>' +
+            '<button class="act-btn" onclick="testTgMessage(\'' + s.chat_id + '\')" title="Тест">🔔</button> ' +
+            '<button class="act-btn" onclick="toggleSubscriber(\'' + s.id + '\',' + (!s.active) + ')" title="' + (s.active ? 'Пауза' : 'Активировать') + '">' + (s.active ? '⏸' : '▶️') + '</button> ' +
+            '<button class="act-btn" style="color:var(--red)" onclick="deleteSubscriber(\'' + s.id + '\')">🗑️</button>' +
+          '</td>' +
+        '</tr>';
       }).join('');
     }
   } catch(e) {
-    block.innerHTML = `<div style="color:var(--red);padding:16px">Ошибка: ${e.message}</div>`;
+    block.innerHTML = '<div style="color:var(--red);padding:16px">Ошибка: ' + e.message + '</div>';
   }
 }
 
-// Главная функция страницы Настройки: API-ключи + Telegram
 async function renderSettingsPage() {
   await loadApiKeysPage();
   await renderTelegramSettings();
@@ -2382,7 +2507,7 @@ function openBotTokenModal() {
     method: 'POST',
     body: JSON.stringify({ bot_token: tok.trim() }),
   }).then(r => {
-    showToast('✅', `Бот @${r.username} подключён`);
+    showToast('✅', 'Бот @' + r.username + ' подключён');
     renderTelegramSettings();
   }).catch(e => showToast('❌', e.message));
 }
@@ -2390,11 +2515,11 @@ function openBotTokenModal() {
 function openAddSubscriberModal() {
   document.getElementById('addSubscriberModal').classList.add('active');
   const box = document.getElementById('subNotifTypes');
-  box.innerHTML = TG_NOTIFICATION_TYPES.map(t => `
-    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
-      <input type="checkbox" value="${t.value}" checked style="accent-color:var(--accent)"/>
-      ${t.label}
-    </label>`).join('');
+  box.innerHTML = TG_NOTIFICATION_TYPES.map(t =>
+    '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">' +
+    '<input type="checkbox" value="' + t.value + '" checked style="accent-color:var(--accent)"/> ' +
+    t.label + '</label>'
+  ).join('');
 }
 
 async function submitAddSubscriber() {
@@ -2447,7 +2572,6 @@ async function sendBroadcast() {
   } catch(e) { showToast('❌', e.message); }
 }
 
-// VIEWER MODE — фильтрация клиентов по доступу
 function applyViewerFilter(clients) {
   const user = getCurrentUser();
   if (user.role === 'admin' || user.role === 'superadmin') return clients;

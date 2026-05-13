@@ -120,5 +120,82 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   }
 });
 
+
+// POST /api/clients/bulk — массовое создание клиентов из выбранных рекламных кабинетов.
+// Body: { source: 'facebook'|'google'|'tiktok', accounts: [{ id, name, currency?, manager_id? }, ...] }
+// Использует user_oauth_tokens текущего юзера → сохраняет токен в integration_tokens на каждого нового клиента.
+router.post('/bulk', requireAdmin, async (req, res) => {
+  try {
+    const { source, accounts } = req.body || {};
+    if (!source || !Array.isArray(accounts) || !accounts.length) {
+      return res.status(400).json({ error: 'source и accounts[] обязательны' });
+    }
+    const VALID = ['facebook', 'google', 'tiktok'];
+    if (!VALID.includes(source)) return res.status(400).json({ error: 'Неизвестный source' });
+
+    // Достаём мастер-токен юзера
+    const tokRes = await query(
+      'SELECT * FROM user_oauth_tokens WHERE user_id=$1 AND source=$2',
+      [req.user.userId, source]
+    );
+    if (!tokRes.rows.length) return res.status(400).json({ error: 'Источник не подключён' });
+    const tok = tokRes.rows[0];
+
+    const created = [];
+    const skipped = [];
+    for (const acc of accounts) {
+      const accId = String(acc.id || '').replace(/-/g,'').replace(/^act_/, '');
+      if (!accId) { skipped.push({ id: acc.id, reason: 'invalid id' }); continue; }
+      const name  = acc.name || ('Account ' + accId);
+
+      // Колонки клиента в зависимости от источника
+      const fields = {
+        facebook: { col: 'fb_account_id'      },
+        google:   { col: 'google_account_id'  },
+        tiktok:   { col: 'tt_account_id'      },
+      }[source];
+
+      // Проверка дубликата ПО НАЛИЧИЮ ID у этого юзера
+      const dup = await query(
+        `SELECT id, name FROM clients WHERE owner_id=$1 AND ${fields.col}=$2`,
+        [req.user.userId, accId]
+      );
+      if (dup.rows.length) {
+        skipped.push({ id: accId, reason: 'already_connected', existing_client_id: dup.rows[0].id, existing_name: dup.rows[0].name });
+        continue;
+      }
+
+      // Создаём клиента
+      const ins = await query(
+        `INSERT INTO clients (name, ${fields.col}, ${source === 'google' ? 'google_manager_id, ' : ''}owner_id)
+         VALUES ($1, $2, ${source === 'google' ? '$3, $4' : '$3'}) RETURNING *`,
+        source === 'google'
+          ? [name, accId, acc.manager_id || null, req.user.userId]
+          : [name, accId, req.user.userId]
+      );
+      const client = ins.rows[0];
+
+      // Сохраняем токен в integration_tokens
+      await query(
+        `INSERT INTO integration_tokens (client_id, source, access_token, refresh_token, expires_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,NOW())
+         ON CONFLICT (client_id, source) DO UPDATE SET
+           access_token=$3,
+           refresh_token=COALESCE($4, integration_tokens.refresh_token),
+           expires_at=$5, updated_at=NOW()`,
+        [client.id, source, tok.access_token, tok.refresh_token, tok.expires_at]
+      );
+
+      created.push(client);
+    }
+
+    res.status(201).json({ created, skipped, source });
+  } catch (e) {
+    console.error('[CLIENTS BULK]', e.message);
+    res.status(500).json({ error: 'Ошибка сервера: ' + e.message });
+  }
+});
+
+
 module.exports = router;
 module.exports.ownsClient = ownsClient;
