@@ -14,8 +14,7 @@
     }
     body {
       font-family: "Inter", sans-serif; background: var(--bg); color: var(--text);
-      min-height: 100vh; display: flex; align-items: center; justify-content: center;
-      padding: 24px;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
     }
     body::before {
       content: ""; position: fixed; top: -200px; left: 50%; transform: translateX(-50%);
@@ -47,6 +46,21 @@
     .btn:hover { opacity: 0.88; transform: translateY(-1px); }
     .btn:disabled { opacity: 0.5; cursor: default; transform: none; }
     .btn-text { display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .btn-google {
+      width: 100%; padding: 12px; border-radius: 10px; cursor: pointer;
+      font-size: 14px; font-weight: 600; font-family: inherit;
+      background: #fff; color: #111; border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      text-decoration: none; transition: opacity .2s; margin-bottom: 14px;
+    }
+    .btn-google:hover { opacity: 0.92; }
+    .btn-google svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .divider {
+      display: flex; align-items: center; gap: 10px;
+      color: var(--muted); font-size: 12px;
+      margin: 8px 0 18px;
+    }
+    .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
     .error-box {
       background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3);
       border-radius: 10px; padding: 12px 16px; font-size: 13px; color: var(--red);
@@ -78,10 +92,17 @@
   <div class="logo">repo<span>plus</span></div>
   <div class="card">
     <h1>Создать аккаунт</h1>
-    <p class="subtitle">Зарегистрируйте ваше агентство</p>
+    <p class="subtitle">Бесплатно. Готово за минуту.</p>
 
     <div class="error-box" id="errorBox"></div>
     <div class="success-box" id="successBox"></div>
+
+    <a class="btn-google" href="#" onclick="signupGoogle();return false">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.07H2.18A10.99 10.99 0 0 0 1 12c0 1.77.42 3.45 1.18 4.93l3.66-2.83z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.83C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
+      Зарегистрироваться через Google
+    </a>
+
+    <div class="divider">или email и пароль</div>
 
     <form id="regForm" onsubmit="handleRegister(event)">
       <div class="field">
@@ -123,6 +144,10 @@ if (localStorage.getItem("rp_access_token")) {
   window.location.href = "dashboard.html";
 }
 
+function signupGoogle() {
+  window.location.href = API + '/api/auth/google/init';
+}
+
 async function handleRegister(e) {
   e.preventDefault();
   const company  = document.getElementById("company").value.trim();
@@ -145,26 +170,41 @@ async function handleRegister(e) {
   }
 
   btn.disabled = true;
-  btnText.innerHTML = "<div class=\"spinner\"></div> Регистрирую...";
+  btnText.innerHTML = '<div class="spinner"></div> Регистрирую...';
 
   try {
-    const resp = await fetch(`${API}/api/auth/register`, {
+    const resp = await fetch(API + '/api/auth/register', {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, name: `${name} (${company})`, company }),
+      body: JSON.stringify({ email, password, name: name + ' (' + company + ')', company }),
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || "Ошибка регистрации");
 
-    // Показываем сообщение об ожидании модерации
+    // Случай 1: pending-flow — заявка отправлена, ждём модерацию
+    if (data.pending) {
+      document.getElementById("regForm").style.display = "none";
+      successBox.innerHTML =
+        '<div style="font-size:36px;margin-bottom:12px">📨</div>' +
+        '<strong>Заявка отправлена!</strong><br><br>' +
+        'Мы активируем ваш аккаунт в течение 24 часов на <strong>' + email + '</strong>.<br><br>' +
+        '<a href="index.html" style="color:#4ade80;text-decoration:none">← Вернуться на главную</a>';
+      successBox.classList.add("show");
+      return;
+    }
+
+    // Случай 2: открытая регистрация — сразу логин
+    if (data.accessToken) {
+      localStorage.setItem('rp_access_token',  data.accessToken);
+      localStorage.setItem('rp_refresh_token', data.refreshToken);
+      localStorage.setItem('rp_user',          JSON.stringify(data.user));
+      window.location.href = 'dashboard.html';
+      return;
+    }
+
+    // Fallback: показываем что ждём
     document.getElementById("regForm").style.display = "none";
-    successBox.innerHTML = `
-      <div style="font-size:36px;margin-bottom:12px">🎉</div>
-      <strong>Заявка отправлена!</strong><br><br>
-      Мы активируем ваш аккаунт в течение 24 часов
-      и свяжемся с вами на <strong>${email}</strong>.<br><br>
-      <a href="index.html" style="color:#4ade80;text-decoration:none">← Вернуться на главную</a>
-    `;
+    successBox.innerHTML = '<strong>Аккаунт создан!</strong> <a href="login.html">Войти</a>';
     successBox.classList.add("show");
   } catch(err) {
     errorBox.textContent = err.message;

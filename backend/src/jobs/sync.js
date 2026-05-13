@@ -1,6 +1,6 @@
 /**
- * Ежедневная синхронизация данных всех активных клиентов
- * После синхронизации — Telegram уведомления
+ * Ежедневная синхронизация данных всех активных клиентов.
+ * После — Telegram отчёт + CPL-алерты.
  */
 const { query }              = require('../db');
 const { syncClientFacebook } = require('../services/facebook');
@@ -10,56 +10,54 @@ const { syncClientGoogle }   = require('../services/google');
 const { syncClientBalances } = require('../services/balances');
 const { sendDailyReport, sendCplAlert } = require('../services/telegram');
 
-// Порог CPL для алерта (можно вынести в env)
 const CPL_ALERT_THRESHOLD = parseFloat(process.env.CPL_ALERT_THRESHOLD || '50');
 
-async function dailySync() {
-  const clientsRes = await query('SELECT * FROM clients WHERE active = true');
-  const clients    = clientsRes.rows;
+/**
+ * @param {string|null} [ownerId]  если задан — синкаем только клиентов этого admin.
+ *                                  null/undefined → все активные клиенты (cron).
+ */
+async function dailySync(ownerId) {
+  const clientsRes = ownerId
+    ? await query('SELECT * FROM clients WHERE active = true AND owner_id = $1', [ownerId])
+    : await query('SELECT * FROM clients WHERE active = true');
+  const clients = clientsRes.rows;
 
-  console.log(`[SYNC] Starting sync for ${clients.length} clients`);
+  console.log('[SYNC] Starting sync for ' + clients.length + ' clients' + (ownerId ? ' (owner=' + ownerId + ')' : ''));
   const errors = [];
 
   for (const client of clients) {
     try { await syncClientFacebook(client); }
     catch (e) {
-      console.error(`[SYNC] FB error for ${client.name}:`, e.message);
+      console.error('[SYNC] FB error for ' + client.name + ':', e.message);
       errors.push({ client: client.name, source: 'facebook', error: e.message });
     }
-
     try { await syncClientTikTok(client); }
     catch (e) {
-      console.error(`[SYNC] TT error for ${client.name}:`, e.message);
+      console.error('[SYNC] TT error for ' + client.name + ':', e.message);
       errors.push({ client: client.name, source: 'tiktok', error: e.message });
     }
-
     try { await syncClientGoogle(client); }
     catch (e) {
-      console.error(`[SYNC] GOOGLE error for ${client.name}:`, e.message);
+      console.error('[SYNC] GOOGLE error for ' + client.name + ':', e.message);
       errors.push({ client: client.name, source: 'google', error: e.message });
     }
-
     try { await syncClientAmoCRM(client); }
     catch (e) {
-      console.error(`[SYNC] AMO error for ${client.name}:`, e.message);
+      console.error('[SYNC] AMO error for ' + client.name + ':', e.message);
       errors.push({ client: client.name, source: 'amocrm', error: e.message });
     }
-
     try { await syncClientBalances(client); }
     catch (e) {
-      console.error(`[SYNC] BAL error for ${client.name}:`, e.message);
+      console.error('[SYNC] BAL error for ' + client.name + ':', e.message);
       errors.push({ client: client.name, source: 'balances', error: e.message });
     }
-
     await new Promise(r => setTimeout(r, 500));
   }
 
   if (errors.length) console.error('[SYNC] Errors:', JSON.stringify(errors));
-  console.log(`[SYNC] Done. ${errors.length} errors.`);
+  console.log('[SYNC] Done. ' + errors.length + ' errors.');
 
-  // ── Post-sync: Telegram уведомления ──────────────────────────
   try {
-    // 1. Суммарный KPI за вчера → daily report
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yDate = yesterday.toISOString().slice(0, 10);
@@ -75,13 +73,19 @@ async function dailySync() {
       FROM ad_metrics WHERE date = $1
     `, [yDate]);
 
-    if (kpiRes.rows[0] && parseFloat(kpiRes.rows[0].total_spend) > 0) {
-      await sendDailyReport(kpiRes.rows[0]).catch(e =>
+    const row = kpiRes.rows[0];
+    const hasData = row && (
+      parseFloat(row.total_spend || 0) > 0 ||
+      parseInt(row.total_leads || 0)   > 0
+    );
+    if (hasData) {
+      await sendDailyReport(row).catch(e =>
         console.error('[SYNC] TG daily report:', e.message)
       );
+    } else {
+      console.log('[SYNC] Skip daily report — no data for', yDate);
     }
 
-    // 2. CPL алерты по кампаниям за вчера
     const highCplRes = await query(`
       SELECT m.campaign_name, m.source, m.cpl, c.name AS client_name
       FROM ad_metrics m
@@ -93,8 +97,8 @@ async function dailySync() {
       LIMIT 10
     `, [yDate, CPL_ALERT_THRESHOLD]);
 
-    for (const row of highCplRes.rows) {
-      await sendCplAlert(row.client_name, row.campaign_name, row.cpl, row.source)
+    for (const r of highCplRes.rows) {
+      await sendCplAlert(r.client_name, r.campaign_name, r.cpl, r.source)
         .catch(e => console.error('[SYNC] TG cpl alert:', e.message));
     }
   } catch (e) {

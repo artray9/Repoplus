@@ -238,7 +238,8 @@
 
     /* ── MODAL ── */
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 24px; opacity: 0; pointer-events: none; transition: opacity .2s; }
-    .modal-overlay.show { opacity: 1; pointer-events: all; }
+    .modal-overlay.show,
+    .modal-overlay.active { opacity: 1; pointer-events: all; }
     .modal { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 32px; width: 100%; max-width: 520px; }
     .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 24px; }
     .form-field { margin-bottom: 18px; }
@@ -510,6 +511,9 @@
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
               <input type="checkbox" id="bfGoogle" checked style="accent-color:#EA4335"/> 🎯 Google
             </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="bfAmocrm" style="accent-color:#00baff"/> 📋 amoCRM
+            </label>
           </div>
           <button class="btn-primary" id="backfillBtn" onclick="runBackfill()">📥 Выгрузить</button>
         </div>
@@ -637,7 +641,11 @@ const API_BASE_URL = 'https://repoplus-production.up.railway.app';
         const nameEl = document.querySelector('.user-name');
         if (nameEl) nameEl.textContent = user.name;
         const roleEl = document.querySelector('.user-role');
-        if (roleEl) roleEl.textContent = user.role === 'admin' ? 'Administrator' : 'Viewer';
+        if (roleEl) {
+          if (user.role === 'superadmin')   roleEl.textContent = 'Super Admin';
+          else if (user.role === 'admin')   roleEl.textContent = 'Administrator';
+          else                              roleEl.textContent = 'Viewer';
+        }
         applyRoleVisibility();
       });
     }
@@ -645,14 +653,17 @@ const API_BASE_URL = 'https://repoplus-production.up.railway.app';
 })();
 
 // Вспомогательная функция: fetch к API с автоматическим токеном + JSON парсинг
+// При 401 authFetch уже редиректит на login — мы возвращаем безопасный пустой объект,
+// чтобы вызывающий код не падал TypeError'ом на `.map`/`.filter`.
 async function apiFetch(path, options = {}) {
   const resp = await authFetch(API_BASE_URL + path, options);
-  if (!resp) return null;
+  if (!resp) return null;            // 401 → редирект уже стартовал
   if (!resp.ok) {
     const d = await resp.json().catch(() => ({}));
     throw new Error(d.error || `HTTP ${resp.status}`);
   }
-  return resp.json();
+  try { return await resp.json(); }
+  catch { return null; }
 }
 
 // ── Admin-only visibility ──────────────────────────────────────────────
@@ -660,7 +671,10 @@ function getCurrentUser() {
   try { return JSON.parse(localStorage.getItem('rp_user') || '{}'); }
   catch(e) { return {}; }
 }
-function isAdmin() { return getCurrentUser().role === 'admin'; }
+function isAdmin() {
+  const role = getCurrentUser().role;
+  return role === 'admin' || role === 'superadmin';
+}
 
 function applyRoleVisibility() {
   const admin = isAdmin();
@@ -1268,7 +1282,7 @@ let CLIENTS_FULL = []; // клиенты с токен-статусами
 
 async function renderClientsPage() {
   try {
-    CLIENTS_FULL = await apiFetch('/api/clients');
+    CLIENTS_FULL = (await apiFetch('/api/clients')) || [];
   } catch(e) { console.error('[CLIENTS]', e); return; }
 
   const tbody = document.getElementById('clientsBody');
@@ -1324,7 +1338,7 @@ async function renderClientsPage() {
 
 // ── ADD CLIENT ────────────────────────────────────────────────
 function openAddClientModal() {
-  ['newClientName','newClientFbId','newClientFbToken','newClientGoogleId','newClientGoogleToken','newClientTtId','newClientTtToken'].forEach(id => {
+  ['newClientName','newClientFbId','newClientFbToken','newClientGoogleId','newClientGoogleMgr','newClientGoogleToken','newClientTtId','newClientTtToken'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -1366,6 +1380,7 @@ async function submitAddClient() {
   const name       = document.getElementById('newClientName').value.trim();
   const fbId       = document.getElementById('newClientFbId').value.trim();
   const googleId   = document.getElementById('newClientGoogleId').value.trim().replace(/-/g,'');
+  const googleMgr  = document.getElementById('newClientGoogleMgr').value.trim().replace(/-/g,'');
   const ttId       = document.getElementById('newClientTtId').value.trim();
   const errEl      = document.getElementById('modalError');
 
@@ -1380,26 +1395,33 @@ async function submitAddClient() {
       method: 'POST',
       body: JSON.stringify({
         name,
-        fb_account_id:     fbId     || null,
-        google_account_id: googleId || null,
-        tt_account_id:     ttId     || null,
+        fb_account_id:     fbId      || null,
+        google_account_id: googleId  || null,
+        google_manager_id: googleMgr || null,
+        tt_account_id:     ttId      || null,
       }),
     });
 
-    // Helper: apply key or manual token
+    // Helper: apply key or manual token — каждый источник изолирован,
+    // чтобы ошибка на одном не убивала остальные.
     async function saveToken(source, keySelId, manualInputId) {
       const keyId  = document.getElementById(keySelId)?.value;
       const manual = document.getElementById(manualInputId)?.value.trim();
-      if (keyId) {
-        await apiFetch('/api/settings/apply-key', {
-          method: 'POST',
-          body: JSON.stringify({ api_key_id: keyId, client_id: created.id }),
-        });
-      } else if (manual) {
-        await apiFetch('/api/integrations/token', {
-          method: 'POST',
-          body: JSON.stringify({ client_id: created.id, source, access_token: manual }),
-        });
+      try {
+        if (keyId) {
+          await apiFetch('/api/settings/apply-key', {
+            method: 'POST',
+            body: JSON.stringify({ api_key_id: keyId, client_id: created.id }),
+          });
+        } else if (manual) {
+          await apiFetch('/api/integrations/token', {
+            method: 'POST',
+            body: JSON.stringify({ client_id: created.id, source, access_token: manual }),
+          });
+        }
+      } catch(e) {
+        console.warn(`[saveToken/${source}]`, e.message);
+        showToast('⚠️', `Токен ${source} не сохранён: ${e.message}`);
       }
     }
 
@@ -1434,8 +1456,9 @@ function openTokenModal(clientId, clientName) {
 
 function connectOAuth() {
   const source    = document.getElementById('tokenSource').value;
-  const jwtToken  = localStorage.getItem('accessToken') || localStorage.getItem('token') || '';
+  const jwtToken  = localStorage.getItem('rp_access_token') || '';
   const baseUrl   = typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : '';
+  if (!jwtToken) { showToast('⚠️', 'Сначала войдите в систему'); return; }
 
   if (source === 'amocrm') {
     const subdomain = document.getElementById('amoSubdomain').value.trim();
@@ -1534,6 +1557,7 @@ async function runBackfill() {
   if (document.getElementById('bfFacebook')?.checked) sources.push('facebook');
   if (document.getElementById('bfTiktok')?.checked)   sources.push('tiktok');
   if (document.getElementById('bfGoogle')?.checked)   sources.push('google');
+  if (document.getElementById('bfAmocrm')?.checked)   sources.push('amocrm');
   if (!sources.length) { showToast('⚠️', 'Выберите хотя бы один источник'); return; }
 
   const btn = document.getElementById('backfillBtn');
@@ -1556,7 +1580,7 @@ async function runBackfill() {
 // ── SETTINGS / API KEYS ───────────────────────────────────────
 let API_KEYS = [];
 
-async function renderSettingsPage() {
+async function loadApiKeysPage() {
   try {
     const resp = await authFetch(`${API_BASE_URL}/api/settings/api-keys`);
     if (!resp || !resp.ok) return;
@@ -1778,6 +1802,11 @@ function showToast(icon, msg) {
         <input class="form-input" id="newClientGoogleId" placeholder="123-456-7890" autocomplete="off"/>
         <div class="form-hint">Google Ads → Настройки → ID клиента</div>
       </div>
+      <div class="form-field" style="margin-bottom:10px">
+        <label class="form-label">Manager (MCC) ID — опционально</label>
+        <input class="form-input" id="newClientGoogleMgr" placeholder="123-456-7890" autocomplete="off"/>
+        <div class="form-hint">Если доступ к кабинету идёт через вашу MCC. Иначе оставьте пустым.</div>
+      </div>
       <div class="form-field" style="margin-bottom:0">
         <label class="form-label">Refresh Token</label>
         <select class="form-input" id="newClientGoogleKeyId" style="margin-bottom:6px">
@@ -1879,6 +1908,36 @@ function showToast(icon, msg) {
   </div>
 </div>
 
+<!-- INVITE CLIENT MODAL -->
+<div class="modal-overlay" id="inviteModal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-title">📧 Пригласить клиента</div>
+    <div class="form-field">
+      <label class="form-label">Email клиента *</label>
+      <input class="form-input" id="inviteEmail" type="email" placeholder="client@company.kz" autocomplete="off"/>
+    </div>
+    <div class="form-field">
+      <label class="form-label">К какому клиенту привязать *</label>
+      <select class="form-input" id="inviteClientSel">
+        <option value="">— Выберите клиента —</option>
+      </select>
+      <div class="form-hint">Клиент будет видеть аналитику только по этому аккаунту</div>
+    </div>
+    <div id="inviteLinkBox" style="display:none;margin-top:14px;padding:14px;background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.3);border-radius:10px">
+      <div style="font-size:12px;color:var(--sub);margin-bottom:6px">Ссылка-приглашение (действует 7 дней)</div>
+      <div style="display:flex;gap:8px">
+        <input class="form-input" id="inviteLinkInput" readonly style="flex:1;font-family:monospace;font-size:12px" onclick="this.select()"/>
+        <button class="btn-primary" onclick="copyInviteLink()" style="padding:0 14px">📋</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px">Отправьте эту ссылку клиенту — он сможет создать пароль и войти в свой кабинет.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('inviteModal').classList.remove('active')">Закрыть</button>
+      <button class="btn-primary" id="inviteSendBtn" onclick="submitInvite()">Создать ссылку</button>
+    </div>
+  </div>
+</div>
+
 <!-- ONBOARDING WIZARD -->
 <div id="onboardOverlay" class="onboard-overlay" style="display:none">
   <div class="onboard-box">
@@ -1975,10 +2034,10 @@ function renderUsersTable(users) {
 async function activateUser(userId, userName, newRole) {
   try {
     await apiFetch(`/api/users/${userId}`, { method:'PATCH', body: JSON.stringify({ role: newRole }) });
-    showToast(`✅ ${userName} активирован как ${newRole}`, 'ok');
+    showToast('✅', `${userName} активирован как ${newRole}`);
     renderUsersPage();
   } catch(e) {
-    showToast('❌ Ошибка активации: ' + e.message, 'error');
+    showToast('❌', 'Ошибка активации: ' + e.message);
   }
 }
 
@@ -2059,7 +2118,7 @@ async function submitUser() {
     const selectedIds = [...checkboxes].filter(c => c.checked).map(c => c.value);
     const uid = savedUser.id || userId;
     // Get current access
-    const currentAccess = await apiFetch('/api/users/' + uid + '/access');
+    const currentAccess = (await apiFetch('/api/users/' + uid + '/access')) || [];
     const currentIds = currentAccess.map(a => a.client_id);
     // Add new
     for (const cid of selectedIds) {
@@ -2154,7 +2213,7 @@ async function renderBalancesPage() {
   grid.innerHTML = '<div style="color:var(--muted);padding:20px">Загрузка...</div>';
   tbody.innerHTML = '';
   try {
-    const rows = await apiFetch('/api/analytics/balances');
+    const rows = (await apiFetch('/api/analytics/balances')) || [];
     if (!rows.length) {
       grid.innerHTML = '<div style="color:var(--muted);padding:20px">Нет данных о балансах. Запустите синхронизацию или добавьте токены.</div>';
       return;
@@ -2170,12 +2229,21 @@ async function renderBalancesPage() {
     // Cards
     const srcColors = { facebook: '#1877F2', tiktok: '#010101', google: '#EA4335' };
     const srcIcons  = { facebook: '📘', tiktok: '🎵', google: '🔵' };
+    // Google Ads API не отдаёт баланс через GAQL — показываем "n/a" и не считаем в итого
+    const fmtBalance = (b) => {
+      if (b.source === 'google') return '<span style="color:var(--muted)">n/a</span>';
+      const val   = parseFloat(b.balance || 0);
+      const color = val > 0 ? '#10b981' : '#f87171';
+      return `<strong style="color:${color}">${val.toFixed(2)} ${b.currency}</strong>`;
+    };
     grid.innerHTML = Object.values(byClient).map(cl => {
-      const totalUSD = cl.balances.reduce((s, b) => s + parseFloat(b.balance || 0), 0);
+      const totalUSD = cl.balances
+        .filter(b => b.source !== 'google')
+        .reduce((s, b) => s + parseFloat(b.balance || 0), 0);
       const rows = cl.balances.map(b =>
         `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
           <span style="font-size:13px">${srcIcons[b.source] || '💳'} ${b.source}</span>
-          <strong style="color:${b.balance > 0 ? '#10b981' : '#f87171'}">${parseFloat(b.balance||0).toFixed(2)} ${b.currency}</strong>
+          ${fmtBalance(b)}
         </div>`
       ).join('');
       return `<div class="chart-card">
@@ -2191,12 +2259,16 @@ async function renderBalancesPage() {
     // Table
     tbody.innerHTML = rows.map(r => {
       const updated = r.fetched_at ? new Date(r.fetched_at).toLocaleString('ru') : '—';
+      const isGoogle = r.source === 'google';
       const balColor = parseFloat(r.balance) > 0 ? '#10b981' : '#f87171';
+      const balCell  = isGoogle
+        ? '<td style="color:var(--muted)">n/a</td>'
+        : `<td style="color:${balColor};font-weight:600">${parseFloat(r.balance||0).toFixed(2)}</td>`;
       return `<tr>
         <td><strong>${escHtml(r.client_name)}</strong></td>
         <td>${srcIcons[r.source] || '💳'} ${r.source}</td>
-        <td style="color:${balColor};font-weight:600">${parseFloat(r.balance||0).toFixed(2)}</td>
-        <td>${r.currency}</td>
+        ${balCell}
+        <td>${isGoogle ? '<span style="color:var(--muted)">—</span>' : r.currency}</td>
         <td style="color:var(--muted)">${r.spend_cap ? parseFloat(r.spend_cap).toFixed(2) : '—'}</td>
         <td style="color:var(--muted);font-size:12px">${updated}</td>
       </tr>`;
@@ -2297,10 +2369,9 @@ async function renderTelegramSettings() {
   }
 }
 
-// Override renderSettingsPage to also load Telegram
-const _origRenderSettings = renderSettingsPage;
+// Главная функция страницы Настройки: API-ключи + Telegram
 async function renderSettingsPage() {
-  await _origRenderSettings();
+  await loadApiKeysPage();
   await renderTelegramSettings();
 }
 
@@ -2371,19 +2442,15 @@ async function sendBroadcast() {
   if (!text) { showToast('❌', 'Введите текст'); return; }
   try {
     const r = await apiFetch('/api/telegram/broadcast', { method: 'POST', body: JSON.stringify({ message: text }) });
-    showToast('✅', `Отправлено: ${r.sent}, ошибок: ${r.failed}`);
+    showToast('✅', 'Отправлено: ' + r.sent + ', ошибок: ' + r.failed);
     document.getElementById('broadcastText').value = '';
   } catch(e) { showToast('❌', e.message); }
 }
 
-// ══════════════════════════════════════════════════════════════
 // VIEWER MODE — фильтрация клиентов по доступу
-// ══════════════════════════════════════════════════════════════
-// Если viewer — фильтруем клиентский список и убираем admin-разделы
 function applyViewerFilter(clients) {
   const user = getCurrentUser();
-  if (user.role === 'admin') return clients;
-  // Viewer видит только клиентов из client_access (backend уже фильтрует через /api/clients)
+  if (user.role === 'admin' || user.role === 'superadmin') return clients;
   return clients;
 }
 </script>

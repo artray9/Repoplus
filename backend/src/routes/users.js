@@ -11,23 +11,53 @@ const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const router = express.Router();
 router.use(authMiddleware);
 
-// GET /api/users — список всех пользователей (admin only)
+// GET /api/users
+// Multi-tenant:
+//  - superadmin → видит всех
+//  - admin       → видит только viewer-ов, имеющих доступ к ЕГО клиентам,
+//                  и себя самого
 router.get('/', requireAdmin, async (req, res) => {
   try {
-    const result = await query(`
-      SELECT u.id, u.email, u.name, u.role, u.created_at,
-        COALESCE(
-          json_agg(
-            json_build_object('client_id', ca.client_id, 'client_name', c.name)
-          ) FILTER (WHERE ca.client_id IS NOT NULL),
-          '[]'
-        ) AS client_access
-      FROM users u
-      LEFT JOIN client_access ca ON ca.user_id = u.id
-      LEFT JOIN clients c ON c.id = ca.client_id
-      GROUP BY u.id
-      ORDER BY u.created_at DESC
-    `);
+    const isSuper = req.user.role === 'superadmin';
+    let sql, params;
+    if (isSuper) {
+      sql = `
+        SELECT u.id, u.email, u.name, u.role, u.created_at,
+          COALESCE(
+            json_agg(json_build_object('client_id', ca.client_id, 'client_name', c.name))
+              FILTER (WHERE ca.client_id IS NOT NULL),
+            '[]'
+          ) AS client_access
+        FROM users u
+        LEFT JOIN client_access ca ON ca.user_id = u.id
+        LEFT JOIN clients c        ON c.id      = ca.client_id
+        GROUP BY u.id
+        ORDER BY u.created_at DESC
+      `;
+      params = [];
+    } else {
+      sql = `
+        SELECT u.id, u.email, u.name, u.role, u.created_at,
+          COALESCE(
+            json_agg(DISTINCT jsonb_build_object('client_id', ca.client_id, 'client_name', c.name))
+              FILTER (WHERE ca.client_id IS NOT NULL),
+            '[]'
+          ) AS client_access
+        FROM users u
+        LEFT JOIN client_access ca ON ca.user_id = u.id
+        LEFT JOIN clients c        ON c.id      = ca.client_id
+        WHERE u.id = $1
+           OR EXISTS (
+             SELECT 1 FROM client_access ca2
+             JOIN clients c2 ON c2.id = ca2.client_id
+             WHERE ca2.user_id = u.id AND c2.owner_id = $1
+           )
+        GROUP BY u.id
+        ORDER BY u.created_at DESC
+      `;
+      params = [req.user.userId];
+    }
+    const result = await query(sql, params);
     res.json(result.rows);
   } catch (e) {
     console.error('[USERS GET]', e.message);

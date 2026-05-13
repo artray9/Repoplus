@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Repoplus — вход…</title>
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #0F172A; color: #F1F5F9;
+           display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+    .box { text-align:center; }
+    .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.15);
+               border-top-color: #6C63FF; border-radius: 50%;
+               animation: spin .8s linear infinite; margin: 0 auto 16px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    a { color: #6C63FF; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="spinner"></div>
+    <div id="msg">Завершаем вход…</div>
+  </div>
+<script>
+(function() {
+  const hash = window.location.hash.slice(1);
+  if (!hash) { window.location.href = 'login.html?error=missing_token'; return; }
+  const p = new URLSearchParams(hash);
+  const access  = p.get('access');
+  const refresh = p.get('refresh');
+  if (!access) { window.location.href = 'login.html?error=missing_token'; return; }
+
+  localStorage.setItem('rp_access_token',  access);
+  localStorage.setItem('rp_refresh_token', refresh || '');
+  localStorage.setItem('rp_user', JSON.stringify({
+    id:    p.get('uid'),
+    email: p.get('email'),
+    name:  p.get('name'),
+    role:  p.get('role'),
+  }));
+  document.getElementById('msg').textContent = 'Готово! Открываем дашборд…';
+  // Очищаем токены из URL и перенаправляем
+  window.history.replaceState({}, '', '/auth-callback.html');
+  setTimeout(() => { window.location.href = 'dashboard.html'; }, 400);
+})();
+</script>
+</body>
+</html>

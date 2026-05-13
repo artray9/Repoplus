@@ -15,6 +15,14 @@ function isSuperAdmin(email) {
 const TOKEN_EXISTS = (source) =>
   `EXISTS(SELECT 1 FROM integration_tokens it WHERE it.client_id=c.id AND it.source='${source}') AS has_${source}_token`;
 
+// Хелпер: клиент принадлежит юзеру (или он superadmin)?
+async function ownsClient(user, clientId) {
+  if (user.role === 'superadmin') return true;
+  const r = await query('SELECT owner_id FROM clients WHERE id = $1', [clientId]);
+  if (!r.rows.length) return false;
+  return r.rows[0].owner_id === user.userId;
+}
+
 // GET /api/clients
 router.get('/', async (req, res) => {
   try {
@@ -26,19 +34,18 @@ router.get('/', async (req, res) => {
     let sql, params;
 
     if (superAdmin) {
-      // Суперадмин видит всех
       sql = `SELECT c.*, ${TOKEN_EXISTS('facebook')}, ${TOKEN_EXISTS('tiktok')}, ${TOKEN_EXISTS('google')}
              FROM clients c ORDER BY c.name`;
       params = [];
     } else if (role === 'admin') {
-      // Обычный admin видит только своих клиентов (owner_id = his id)
+      // Multi-tenant: admin видит ТОЛЬКО своих клиентов.
       sql = `SELECT c.*, ${TOKEN_EXISTS('facebook')}, ${TOKEN_EXISTS('tiktok')}, ${TOKEN_EXISTS('google')}
              FROM clients c
-             WHERE c.owner_id = $1 OR c.owner_id IS NULL
+             WHERE c.owner_id = $1
              ORDER BY c.name`;
       params = [userId];
     } else {
-      // Viewer видит только клиентов через client_access
+      // Viewer: только клиенты из client_access
       sql = `SELECT c.*, ${TOKEN_EXISTS('facebook')}, ${TOKEN_EXISTS('tiktok')}, ${TOKEN_EXISTS('google')}
              FROM clients c
              JOIN client_access ca ON ca.client_id = c.id AND ca.user_id = $1
@@ -75,6 +82,9 @@ router.post('/', requireAdmin, async (req, res) => {
 // PATCH /api/clients/:id
 router.patch('/:id', requireAdmin, async (req, res) => {
   try {
+    if (!(await ownsClient(req.user, req.params.id))) {
+      return res.status(404).json({ error: 'Клиент не найден' });
+    }
     const { name, fb_account_id, google_account_id, tt_account_id, amo_subdomain, active, google_manager_id } = req.body;
     const result = await query(
       `UPDATE clients SET
@@ -99,6 +109,9 @@ router.patch('/:id', requireAdmin, async (req, res) => {
 // DELETE /api/clients/:id
 router.delete('/:id', requireAdmin, async (req, res) => {
   try {
+    if (!(await ownsClient(req.user, req.params.id))) {
+      return res.status(404).json({ error: 'Клиент не найден' });
+    }
     await query('DELETE FROM clients WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
   } catch (e) {
@@ -108,3 +121,4 @@ router.delete('/:id', requireAdmin, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.ownsClient = ownsClient;

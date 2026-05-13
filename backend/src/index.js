@@ -20,17 +20,33 @@ const HOST = '0.0.0.0';
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', ts: new Date() }));
 
+// Whitelist: production-домены + всё что в FRONTEND_URL и EXTRA_ORIGINS.
+// EXTRA_ORIGINS — список через запятую: https://foo.com,https://bar.com
 const allowedOrigins = [
   'https://repoplus.kz',
   'http://repoplus.kz',
-  'https://artray9.github.io',
+  'https://www.repoplus.kz',
   process.env.FRONTEND_URL,
+  ...(process.env.EXTRA_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
 ].filter(Boolean);
+
+// Wildcard preview-домены: github.io, railway.app, vercel.app
+function isOriginAllowed(origin) {
+  if (allowedOrigins.includes(origin)) return true;
+  try {
+    const host = new URL(origin).host;
+    if (host.endsWith('.github.io'))      return true;
+    if (host.endsWith('.up.railway.app')) return true;
+    if (host.endsWith('.vercel.app'))     return true;
+  } catch (e) {}
+  return false;
+}
 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (isOriginAllowed(origin)) return callback(null, true);
+    console.warn('[CORS] Blocked:', origin);
     callback(new Error('CORS: ' + origin + ' not allowed'));
   },
   credentials: true,
@@ -51,7 +67,6 @@ app.use('/api/users',        usersRoutes);
 app.use('/api/telegram',     telegramRoutes);
 app.use('/api/oauth',        oauthRoutes);
 
-// Public: wishes
 app.post('/api/wishes', async (req, res) => {
   const { text, email } = req.body || {};
   if (!text) return res.status(400).json({ error: 'text required' });
@@ -63,10 +78,11 @@ app.post('/api/wishes', async (req, res) => {
   res.json({ ok: true });
 });
 
-cron.schedule('0 1 * * *', async () => {
-  console.log('[CRON] daily sync...');
+// Daily sync — 06:00 Asia/Almaty каждый день.
+cron.schedule('0 6 * * *', async () => {
+  console.log('[CRON] daily sync (Asia/Almaty 06:00)...');
   try { await dailySync(); } catch(e) { console.error('[CRON]', e.message); }
-});
+}, { timezone: 'Asia/Almaty' });
 
 async function autoMigrate() {
   const client = await pool.connect();
@@ -197,9 +213,11 @@ async function autoMigrate() {
       UNIQUE(email)
     )`);
     await client.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'`);
-    await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
-    await client.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS google_manager_id TEXT`);
-    await client.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id) ON DELETE SET NULL`);
+    await client.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id) ON DELETE SET NULL`);
+    await client.query(`ALTER TABLE users    DROP CONSTRAINT IF EXISTS users_role_check`);
+    await client.query(`ALTER TABLE users ALTER COLUMN password DROP NOT NULL`);
+    await client.query(`ALTER TABLE clients  ADD COLUMN IF NOT EXISTS google_manager_id TEXT`);
+    await client.query(`ALTER TABLE clients  ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id) ON DELETE SET NULL`);
     console.log('[MIGRATE] complete');
   } catch(e) {
     console.error('[MIGRATE] error:', e.message);

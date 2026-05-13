@@ -5,13 +5,17 @@ const { dailySync } = require('../jobs/sync');
 const { syncClientFacebook } = require('../services/facebook');
 const { syncClientTikTok }   = require('../services/tiktok');
 const { syncClientGoogle }   = require('../services/google');
+const { syncClientAmoCRM }   = require('../services/amocrm');
+const { ownsClient }         = require('./clients');
 
 const router = express.Router();
 router.use(authMiddleware);
 
-// GET /api/integrations/:clientId
 router.get('/:clientId', requireAdmin, async (req, res) => {
   try {
+    if (!(await ownsClient(req.user, req.params.clientId))) {
+      return res.status(404).json({ error: 'Клиент не найден' });
+    }
     const result = await query(
       `SELECT source, expires_at, updated_at
        FROM integration_tokens WHERE client_id = $1`,
@@ -23,12 +27,14 @@ router.get('/:clientId', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/integrations/token
 router.post('/token', requireAdmin, async (req, res) => {
   try {
     const { client_id, source, access_token, refresh_token, expires_at } = req.body;
     if (!client_id || !source || !access_token) {
       return res.status(400).json({ error: 'client_id, source и access_token обязательны' });
+    }
+    if (!(await ownsClient(req.user, client_id))) {
+      return res.status(404).json({ error: 'Клиент не найден' });
     }
     await query(
       `INSERT INTO integration_tokens (client_id, source, access_token, refresh_token, expires_at, updated_at)
@@ -43,18 +49,16 @@ router.post('/token', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/integrations/sync/manual
 router.post('/sync/manual', requireAdmin, async (req, res) => {
   try {
     res.json({ ok: true, message: 'Синхронизация запущена' });
-    dailySync().catch(e => console.error('[MANUAL SYNC] error:', e.message));
+    const ownerId = req.user.role === 'superadmin' ? null : req.user.userId;
+    dailySync(ownerId).catch(e => console.error('[MANUAL SYNC] error:', e.message));
   } catch (e) {
     res.status(500).json({ error: 'Ошибка запуска синхронизации' });
   }
 });
 
-// POST /api/integrations/sync/backfill
-// Body: { client_id?: uuid|null, from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', sources?: ['facebook','tiktok','google'] }
 router.post('/sync/backfill', requireAdmin, async (req, res) => {
   try {
     const { client_id, from, to, sources } = req.body;
@@ -65,36 +69,52 @@ router.post('/sync/backfill', requireAdmin, async (req, res) => {
 
     const activeSources = Array.isArray(sources) && sources.length
       ? sources
-      : ['facebook', 'tiktok', 'google'];
+      : ['facebook', 'tiktok', 'google', 'amocrm'];
 
-    res.json({ ok: true, message: `Backfill запущен: ${from} — ${to} (${activeSources.join(', ')})` });
+    if (client_id && !(await ownsClient(req.user, client_id))) {
+      return res.status(404).json({ error: 'Клиент не найден' });
+    }
 
+    res.json({ ok: true, message: 'Backfill: ' + from + '-' + to + ' (' + activeSources.join(', ') + ')' });
+
+    const isSuper = req.user.role === 'superadmin';
     (async () => {
       try {
-        const clientsRes = client_id
-          ? await query('SELECT * FROM clients WHERE id = $1 AND active = true', [client_id])
-          : await query('SELECT * FROM clients WHERE active = true');
+        let clientsRes;
+        if (client_id) {
+          clientsRes = await query('SELECT * FROM clients WHERE id = $1 AND active = true', [client_id]);
+        } else if (isSuper) {
+          clientsRes = await query('SELECT * FROM clients WHERE active = true');
+        } else {
+          clientsRes = await query('SELECT * FROM clients WHERE active = true AND owner_id = $1', [req.user.userId]);
+        }
         const clients = clientsRes.rows;
-        console.log(`[BACKFILL] ${from}–${to} sources=${activeSources.join(',')} for ${clients.length} client(s)`);
+        console.log('[BACKFILL] ' + from + '-' + to + ' for ' + clients.length + ' client(s)');
 
         for (const client of clients) {
           if (activeSources.includes('facebook')) {
             try {
               const n = await syncClientFacebook(client, from, to);
-              console.log(`[BACKFILL] ${client.name} FB: ${n} rows`);
-            } catch (e) { console.error(`[BACKFILL] ${client.name} FB:`, e.message); }
+              console.log('[BACKFILL] ' + client.name + ' FB: ' + n + ' rows');
+            } catch (e) { console.error('[BACKFILL] ' + client.name + ' FB:', e.message); }
           }
           if (activeSources.includes('tiktok')) {
             try {
               const n = await syncClientTikTok(client, from, to);
-              console.log(`[BACKFILL] ${client.name} TT: ${n} rows`);
-            } catch (e) { console.error(`[BACKFILL] ${client.name} TT:`, e.message); }
+              console.log('[BACKFILL] ' + client.name + ' TT: ' + n + ' rows');
+            } catch (e) { console.error('[BACKFILL] ' + client.name + ' TT:', e.message); }
           }
           if (activeSources.includes('google')) {
             try {
               const n = await syncClientGoogle(client, from, to);
-              console.log(`[BACKFILL] ${client.name} Google: ${n} rows`);
-            } catch (e) { console.error(`[BACKFILL] ${client.name} Google:`, e.message); }
+              console.log('[BACKFILL] ' + client.name + ' Google: ' + n + ' rows');
+            } catch (e) { console.error('[BACKFILL] ' + client.name + ' Google:', e.message); }
+          }
+          if (activeSources.includes('amocrm')) {
+            try {
+              const n = await syncClientAmoCRM(client, from, to);
+              console.log('[BACKFILL] ' + client.name + ' amoCRM: ' + n + ' leads');
+            } catch (e) { console.error('[BACKFILL] ' + client.name + ' amoCRM:', e.message); }
           }
           await new Promise(r => setTimeout(r, 1000));
         }

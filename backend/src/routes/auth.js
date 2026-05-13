@@ -1,18 +1,26 @@
-const express  = require('express');
-const bcrypt   = require('bcryptjs');
-const jwt      = require('jsonwebtoken');
-const crypto   = require('crypto');
+const express   = require('express');
+const bcrypt    = require('bcryptjs');
+const jwt       = require('jsonwebtoken');
+const crypto    = require('crypto');
+const axios     = require('axios');
 const rateLimit = require('express-rate-limit');
 const { query } = require('../db');
 
 const router = express.Router();
 
-const FRONTEND_URL     = process.env.FRONTEND_URL || 'https://repoplus.kz';
+const FRONTEND_URL      = process.env.FRONTEND_URL || 'https://repoplus.kz';
+const BACKEND_URL       = process.env.BACKEND_URL  || 'https://repoplus-production.up.railway.app';
 const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase();
+// Открытая регистрация: новые юзеры сразу становятся admin своего тенанта.
+// Если хотите вернуть pending-flow — поставьте ENV OPEN_SIGNUP=false
+const OPEN_SIGNUP = (process.env.OPEN_SIGNUP || 'true').toLowerCase() !== 'false';
 
-// ── Rate limiters ─────────────────────────────────────────────────
+// Google login (отдельно от Google Ads OAuth)
+const GOOGLE_LOGIN_CLIENT_ID     = process.env.GOOGLE_LOGIN_CLIENT_ID     || process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_LOGIN_CLIENT_SECRET = process.env.GOOGLE_LOGIN_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 минут
+  windowMs: 15 * 60 * 1000,
   max: 10,
   message: { error: 'Слишком много попыток входа. Подождите 15 минут.' },
   standardHeaders: true,
@@ -20,17 +28,16 @@ const loginLimiter = rateLimit({
 });
 
 const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 час
-  max: 5,
+  windowMs: 60 * 60 * 1000,
+  max: 20,
   message: { error: 'Слишком много регистраций с этого IP.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// ── Helpers ───────────────────────────────────────────────────────
 function isSuperAdmin(email) {
   if (!SUPER_ADMIN_EMAIL) return false;
-  return SUPER_ADMIN_EMAIL.split(',').map(e => e.trim()).includes(email.toLowerCase());
+  return SUPER_ADMIN_EMAIL.split(',').map(e => e.trim()).includes((email || '').toLowerCase());
 }
 
 function signTokens(user) {
@@ -48,7 +55,30 @@ function signTokens(user) {
   return { accessToken, refreshToken, role };
 }
 
-// ── POST /api/auth/login ──────────────────────────────────────────
+function pickUserRole() {
+  // При открытой регистрации новый юзер — admin своего тенанта.
+  // При закрытой — pending, ждёт активации.
+  return OPEN_SIGNUP ? 'admin' : 'pending';
+}
+
+async function notifyNewUser(displayName, email) {
+  const text =
+    '🆕 Новая регистрация на Repoplus!\n' +
+    '👤 ' + displayName + '\n📧 ' + email;
+  let delivered = false;
+  try {
+    const { sendBroadcast } = require('../services/telegram');
+    const r = await sendBroadcast(text).catch(() => null);
+    delivered = !!(r && r.sent > 0);
+  } catch(e) {}
+  if (!delivered) {
+    console.warn('=================================================');
+    console.warn('[NEW USER] ', displayName, '<' + email + '>');
+    console.warn('=================================================');
+  }
+}
+
+// ── POST /api/auth/login ───────────────────────────────────────
 router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -57,12 +87,15 @@ router.post('/login', loginLimiter, async (req, res) => {
     const result = await query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
     const user = result.rows[0];
     if (!user) return res.status(401).json({ error: 'Неверный email или пароль' });
+    if (!user.password) {
+      return res.status(401).json({ error: 'Этот email привязан к входу через Google — нажмите «Войти через Google»' });
+    }
 
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: 'Неверный email или пароль' });
 
     if (user.role === 'pending') {
-      return res.status(403).json({ error: 'Ваш аккаунт ожидает подтверждения. Мы свяжемся с вами в ближайшее время.' });
+      return res.status(403).json({ error: 'Ваш аккаунт ожидает подтверждения' });
     }
 
     const { accessToken, refreshToken, role } = signTokens(user);
@@ -73,7 +106,7 @@ router.post('/login', loginLimiter, async (req, res) => {
   }
 });
 
-// ── POST /api/auth/refresh ────────────────────────────────────────
+// ── POST /api/auth/refresh ─────────────────────────────────────
 router.post('/refresh', async (req, res) => {
   try {
     const { refreshToken } = req.body;
@@ -82,41 +115,46 @@ router.post('/refresh', async (req, res) => {
     const result  = await query('SELECT * FROM users WHERE id = $1', [payload.userId]);
     const user = result.rows[0];
     if (!user) return res.status(401).json({ error: 'Пользователь не найден' });
-    const { accessToken, role } = signTokens(user);
-    res.json({ accessToken });
+    if (user.role === 'pending') return res.status(403).json({ error: 'Аккаунт ожидает подтверждения' });
+    const tokens = signTokens(user);
+    res.json({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
   } catch (e) {
     res.status(401).json({ error: 'Невалидный refresh token' });
   }
 });
 
-// ── POST /api/auth/register ───────────────────────────────────────
+// ── POST /api/auth/register ────────────────────────────────────
+// При OPEN_SIGNUP=true: создаём юзера-admin и сразу логиним.
+// При OPEN_SIGNUP=false: создаём pending, ждём активации.
 router.post('/register', registerLimiter, async (req, res) => {
   try {
     const { email, password, name, company } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email и пароль обязательны' });
-    if (password.length < 8) return res.status(400).json({ error: 'Пароль минимум 8 символов' });
+    if (password.length < 8)  return res.status(400).json({ error: 'Пароль минимум 8 символов' });
 
     const hash = await bcrypt.hash(password, 12);
     const displayName = name || company || email;
+    const role = isSuperAdmin(email) ? 'admin' : pickUserRole();
 
-    // Если это superadmin email — сразу admin, иначе pending
-    const role = isSuperAdmin(email) ? 'admin' : 'pending';
-
-    const result = await query(
+    const ins = await query(
       `INSERT INTO users (email, password, name, role)
        VALUES ($1,$2,$3,$4) RETURNING id, email, name, role`,
       [email.toLowerCase(), hash, displayName, role]
     );
+    const user = ins.rows[0];
 
-    // Уведомление в Telegram суперадмину
-    try {
-      const { sendBroadcast } = require('../services/telegram');
-      await sendBroadcast(
-        `🆕 Новая регистрация на Repoplus!\n👤 ${displayName}\n📧 ${email}\n\nОдобрите в разделе Пользователи → измените роль с pending на admin.`
-      ).catch(() => {});
-    } catch(e) {}
+    notifyNewUser(displayName, email).catch(() => {});
 
-    res.status(201).json({ user: result.rows[0] });
+    if (role === 'pending') {
+      return res.status(201).json({ user, pending: true });
+    }
+
+    // Auto-login для admin
+    const { accessToken, refreshToken, role: r } = signTokens(user);
+    res.status(201).json({
+      accessToken, refreshToken,
+      user: { id: user.id, email: user.email, name: user.name, role: r },
+    });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Email уже занят' });
     console.error('/register error:', e);
@@ -124,11 +162,108 @@ router.post('/register', registerLimiter, async (req, res) => {
   }
 });
 
-// ── POST /api/auth/invite ─────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
+// Sign in with Google (OAuth user login)
+// ──────────────────────────────────────────────────────────────
+
+// GET /api/auth/google/init?next=/dashboard.html
+router.get('/google/init', (req, res) => {
+  if (!GOOGLE_LOGIN_CLIENT_ID) {
+    return res.redirect(FRONTEND_URL + '/login.html?error=google_not_configured');
+  }
+  const next  = req.query.next || '/dashboard.html';
+  const state = Buffer.from(JSON.stringify({ next, ts: Date.now() })).toString('base64url');
+  const params = new URLSearchParams({
+    client_id:     GOOGLE_LOGIN_CLIENT_ID,
+    redirect_uri:  BACKEND_URL + '/api/auth/google/callback',
+    response_type: 'code',
+    scope:         'openid email profile',
+    access_type:   'online',
+    prompt:        'select_account',
+    state,
+  });
+  res.redirect('https://accounts.google.com/o/oauth2/v2/auth?' + params.toString());
+});
+
+router.get('/google/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error || !code) return res.redirect(FRONTEND_URL + '/login.html?error=google_denied');
+
+  try {
+    // Получаем access_token + id_token
+    const tokenResp = await axios.post('https://oauth2.googleapis.com/token', {
+      code,
+      client_id:     GOOGLE_LOGIN_CLIENT_ID,
+      client_secret: GOOGLE_LOGIN_CLIENT_SECRET,
+      redirect_uri:  BACKEND_URL + '/api/auth/google/callback',
+      grant_type:    'authorization_code',
+    });
+    const { access_token, id_token } = tokenResp.data;
+
+    // userinfo
+    const userResp = await axios.get('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: { Authorization: 'Bearer ' + access_token },
+    });
+    const profile = userResp.data;
+    const email = (profile.email || '').toLowerCase();
+    const name  = profile.name || profile.given_name || email;
+    if (!email) throw new Error('No email from Google');
+    if (profile.email_verified === false) throw new Error('Google email not verified');
+
+    // Найти или создать юзера
+    let user;
+    const existing = await query('SELECT * FROM users WHERE email = $1', [email]);
+    if (existing.rows.length) {
+      user = existing.rows[0];
+      // Если pending — активируем (open signup означает, что любой Google-юзер ok)
+      if (user.role === 'pending' && OPEN_SIGNUP) {
+        const upd = await query(
+          `UPDATE users SET role='admin', name = COALESCE(name, $2) WHERE id = $1 RETURNING *`,
+          [user.id, name]
+        );
+        user = upd.rows[0];
+      }
+    } else {
+      const role = isSuperAdmin(email) ? 'admin' : pickUserRole();
+      // password = NULL → юзер сможет логиниться только через Google
+      const ins = await query(
+        `INSERT INTO users (email, password, name, role)
+         VALUES ($1, NULL, $2, $3) RETURNING *`,
+        [email, name, role]
+      );
+      user = ins.rows[0];
+      notifyNewUser(name, email).catch(() => {});
+    }
+
+    if (user.role === 'pending') {
+      return res.redirect(FRONTEND_URL + '/login.html?error=pending_approval');
+    }
+
+    const tokens = signTokens(user);
+    // Передаём токены через fragment (#) — фронт их подхватит, в логах не светятся.
+    const frag = new URLSearchParams({
+      access:  tokens.accessToken,
+      refresh: tokens.refreshToken,
+      uid:     user.id,
+      email:   user.email,
+      name:    user.name || '',
+      role:    tokens.role,
+    });
+    res.redirect(FRONTEND_URL + '/auth-callback.html#' + frag.toString());
+  } catch(e) {
+    console.error('[GOOGLE LOGIN]', e.message);
+    res.redirect(FRONTEND_URL + '/login.html?error=google_failed');
+  }
+});
+
+// ──────────────────────────────────────────────────────────────
+// Invitations (старый flow для viewer)
+// ──────────────────────────────────────────────────────────────
+
 router.post('/invite', async (req, res) => {
   try {
     const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
+    if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
     const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET);
     if (!['admin', 'superadmin'].includes(decoded.role)) {
       return res.status(403).json({ error: 'Только для администратора' });
@@ -148,7 +283,7 @@ router.post('/invite', async (req, res) => {
       [token, email.toLowerCase(), client_id, client_name || '', decoded.userId, expires]
     );
 
-    const inviteUrl = `${FRONTEND_URL}/invite.html?token=${token}`;
+    const inviteUrl = FRONTEND_URL + '/invite.html?token=' + token;
     res.json({ ok: true, inviteUrl, expiresAt: expires });
   } catch(e) {
     console.error('/invite error:', e);
@@ -156,7 +291,6 @@ router.post('/invite', async (req, res) => {
   }
 });
 
-// ── GET /api/auth/invite/:token ───────────────────────────────────
 router.get('/invite/:token', async (req, res) => {
   try {
     const result = await query(
@@ -171,7 +305,6 @@ router.get('/invite/:token', async (req, res) => {
   }
 });
 
-// ── POST /api/auth/invite/:token/accept ──────────────────────────
 router.post('/invite/:token/accept', async (req, res) => {
   try {
     const invRes = await query(

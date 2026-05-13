@@ -24,6 +24,7 @@ async function migrate() {
         name              TEXT NOT NULL,
         fb_account_id     TEXT,
         google_account_id TEXT,
+        google_manager_id TEXT,
         tt_account_id     TEXT,
         amo_subdomain     TEXT,
         active            BOOLEAN DEFAULT true,
@@ -79,10 +80,8 @@ async function migrate() {
       )
     `);
 
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_metrics_client_date ON ad_metrics(client_id, date);
-      CREATE INDEX IF NOT EXISTS idx_metrics_source ON ad_metrics(source)
-    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_metrics_client_date ON ad_metrics(client_id, date)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_metrics_source ON ad_metrics(source)`);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS crm_leads (
@@ -122,12 +121,8 @@ async function migrate() {
       )
     `);
 
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_client_access_user ON client_access(user_id)
-    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_client_access_user ON client_access(user_id)`);
 
-
-    // Telegram bot settings & subscriptions
     await client.query(`
       CREATE TABLE IF NOT EXISTS telegram_settings (
         id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -152,9 +147,36 @@ async function migrate() {
       )
     `);
 
-    // Idempotent column additions
-    await client.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'`);
-    await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS wishes (
+        id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        text       TEXT NOT NULL,
+        email      TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS invitations (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        token       TEXT UNIQUE NOT NULL,
+        email       TEXT NOT NULL,
+        client_id   UUID REFERENCES clients(id) ON DELETE CASCADE,
+        client_name TEXT,
+        invited_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+        expires_at  TIMESTAMP NOT NULL,
+        used_at     TIMESTAMP,
+        created_at  TIMESTAMP DEFAULT NOW(),
+        UNIQUE(email)
+      )
+    `);
+
+    await client.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS meta              JSONB DEFAULT '{}'`);
+    await client.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id) ON DELETE SET NULL`);
+    await client.query(`ALTER TABLE clients  ADD COLUMN IF NOT EXISTS google_manager_id TEXT`);
+    await client.query(`ALTER TABLE clients  ADD COLUMN IF NOT EXISTS owner_id          UUID REFERENCES users(id) ON DELETE SET NULL`);
+    await client.query(`ALTER TABLE users    DROP CONSTRAINT IF EXISTS users_role_check`);
+    await client.query(`ALTER TABLE users ALTER COLUMN password DROP NOT NULL`);
 
     await client.query('COMMIT');
     console.log('Migration complete');
