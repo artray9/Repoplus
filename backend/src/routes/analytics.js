@@ -98,7 +98,7 @@ router.get('/', async (req, res) => {
     });
   } catch (e) {
     console.error('/analytics error:', e);
-    res.status(500).json({ error: 'Ошибка сервера' });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -115,7 +115,7 @@ router.get('/balances', async (req, res) => {
       const ids = accessRes.rows.map(r => r.client_id);
       if (!ids.length) return res.json([]);
       params.push(ids);
-      whereClause = `ab.client_id = ANY($${params.length})`;
+      whereClause = 'ab.client_id = ANY($' + params.length + ')';
     } else if (user.role === 'admin') {
       const ownRes = await query(
         'SELECT id FROM clients WHERE owner_id = $1', [user.userId]
@@ -123,22 +123,24 @@ router.get('/balances', async (req, res) => {
       const ids = ownRes.rows.map(r => r.id);
       if (!ids.length) return res.json([]);
       params.push(ids);
-      whereClause = `ab.client_id = ANY($${params.length})`;
+      whereClause = 'ab.client_id = ANY($' + params.length + ')';
     }
 
-    const result = await query(`
-      SELECT ab.client_id, c.name AS client_name,
-             ab.source, ab.balance, ab.currency, ab.spend_cap, ab.fetched_at
-      FROM account_balances ab
-      JOIN clients c ON c.id = ab.client_id
-      WHERE ${whereClause}
-      ORDER BY c.name, ab.source
-    `, params);
+    const result = await query(
+      'SELECT ab.client_id, c.name AS client_name,' +
+      '       ab.source, ab.balance, ab.currency, ab.spend_cap,' +
+      '       ab.amount_spent, ab.next_bill_date, ab.extra, ab.fetched_at ' +
+      'FROM account_balances ab ' +
+      'JOIN clients c ON c.id = ab.client_id ' +
+      'WHERE ' + whereClause + ' ' +
+      'ORDER BY c.name, ab.source',
+      params
+    );
 
     res.json(result.rows);
   } catch (e) {
     console.error('/analytics/balances error:', e);
-    res.status(500).json({ error: 'Ошибка сервера' });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

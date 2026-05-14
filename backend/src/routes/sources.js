@@ -1,10 +1,8 @@
 /**
  * /api/sources — листинг доступных рекламных кабинетов после OAuth discovery.
  *
- * GET /api/sources/{facebook|google|tiktok}/accounts
- *   → [{ id, name, currency, status, already_connected, existing_client_id }]
- * GET /api/sources/status
- *   → { facebook: { connected: true, ... }, ... }
+ * Google Ads API часто меняет версии — пробуем v20 → v19 → v18 → v17,
+ * первая что отдала 200 — используется.
  */
 const express = require('express');
 const axios   = require('axios');
@@ -14,7 +12,7 @@ const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const router = express.Router();
 router.use(authMiddleware);
 
-const GOOGLE_ADS_BASE = 'https://googleads.googleapis.com/v18';
+const GOOGLE_API_VERSIONS = ['v20', 'v19', 'v18', 'v17'];
 
 async function getUserToken(userId, source) {
   const r = await query(
@@ -24,9 +22,9 @@ async function getUserToken(userId, source) {
   return r.rows[0] || null;
 }
 
-async function getExistingMap(userId, source, fieldName) {
+async function getExistingMap(userId, fieldName) {
   const r = await query(
-    `SELECT id, ${fieldName} AS acc FROM clients WHERE owner_id=$1 AND ${fieldName} IS NOT NULL`,
+    'SELECT id, ' + fieldName + ' AS acc FROM clients WHERE owner_id=$1 AND ' + fieldName + ' IS NOT NULL',
     [userId]
   );
   const map = new Map();
@@ -36,7 +34,7 @@ async function getExistingMap(userId, source, fieldName) {
   return map;
 }
 
-// ════════════════════ FACEBOOK ════════════════════
+// ── Facebook
 router.get('/facebook/accounts', requireAdmin, async (req, res) => {
   try {
     const tok = await getUserToken(req.user.userId, 'facebook');
@@ -49,13 +47,13 @@ router.get('/facebook/accounts', requireAdmin, async (req, res) => {
         limit:        500,
       },
     });
-    const existing = await getExistingMap(req.user.userId, 'facebook', 'fb_account_id');
+    const existing = await getExistingMap(req.user.userId, 'fb_account_id');
     const statusLabels = {
       1: 'Active', 2: 'Disabled', 3: 'Unsettled', 7: 'Pending Risk Review',
       8: 'Pending Settlement', 9: 'In Grace Period', 100: 'Pending Closure',
       101: 'Closed', 201: 'Any Active', 202: 'Any Closed',
     };
-    const accounts = (r.data?.data || []).map(a => {
+    const accounts = (r.data && r.data.data || []).map(a => {
       const accId = String(a.account_id).replace(/^act_/, '');
       return {
         id:                  accId,
@@ -70,12 +68,33 @@ router.get('/facebook/accounts', requireAdmin, async (req, res) => {
     });
     res.json({ source: 'facebook', accounts });
   } catch(e) {
-    console.error('[SOURCES FB]', e.response?.data || e.message);
-    res.status(500).json({ error: 'Ошибка получения списка FB-кабинетов: ' + (e.response?.data?.error?.message || e.message) });
+    console.error('[SOURCES FB]', (e.response && e.response.data) || e.message);
+    res.status(500).json({ error: 'Ошибка получения списка FB-кабинетов: ' +
+      ((e.response && e.response.data && e.response.data.error && e.response.data.error.message) || e.message) });
   }
 });
 
-// ════════════════════ GOOGLE ════════════════════
+// ── Google (с fallback по версиям)
+async function googleListAccessible(accessToken, devToken) {
+  let lastErr = null;
+  for (const ver of GOOGLE_API_VERSIONS) {
+    try {
+      const r = await axios.get(
+        'https://googleads.googleapis.com/' + ver + '/customers:listAccessibleCustomers',
+        { headers: { Authorization: 'Bearer ' + accessToken, 'developer-token': devToken } }
+      );
+      return { version: ver, resourceNames: r.data.resourceNames || [] };
+    } catch(e) {
+      lastErr = e;
+      const code = e.response && e.response.status;
+      // 404/403 для устаревшей версии — пробуем следующую. Прочие ошибки — пробрасываем.
+      if (code !== 404 && code !== 400 && code !== 403) throw e;
+      console.warn('[GOOGLE] ' + ver + ' returned ' + code + ', trying next');
+    }
+  }
+  throw lastErr || new Error('All Google API versions failed');
+}
+
 router.get('/google/accounts', requireAdmin, async (req, res) => {
   try {
     const tok = await getUserToken(req.user.userId, 'google');
@@ -90,21 +109,22 @@ router.get('/google/accounts', requireAdmin, async (req, res) => {
     });
     const accessToken = tr.data.access_token;
     const devToken    = process.env.GOOGLE_DEVELOPER_TOKEN || process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '';
+    if (!devToken) {
+      return res.status(500).json({ error: 'GOOGLE_DEVELOPER_TOKEN не задан в env' });
+    }
 
-    const listResp = await axios.get(
-      GOOGLE_ADS_BASE + '/customers:listAccessibleCustomers',
-      { headers: { Authorization: 'Bearer ' + accessToken, 'developer-token': devToken } }
-    );
-    const resourceNames = listResp.data.resourceNames || [];
+    const { version, resourceNames } = await googleListAccessible(accessToken, devToken);
+    console.log('[GOOGLE] using API ' + version + ', accounts: ' + resourceNames.length);
 
-    const existing = await getExistingMap(req.user.userId, 'google', 'google_account_id');
+    const existing = await getExistingMap(req.user.userId, 'google_account_id');
     const accounts = [];
+
     for (const rn of resourceNames) {
       const custId = rn.replace('customers/', '');
       let info = { name: 'Customer ' + custId, currency: '', manager: false };
       try {
         const cr = await axios.post(
-          GOOGLE_ADS_BASE + '/customers/' + custId + '/googleAds:search',
+          'https://googleads.googleapis.com/' + version + '/customers/' + custId + '/googleAds:search',
           { query: 'SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.manager FROM customer LIMIT 1' },
           { headers: {
               Authorization:       'Bearer ' + accessToken,
@@ -114,13 +134,13 @@ router.get('/google/accounts', requireAdmin, async (req, res) => {
             }
           }
         );
-        const c = cr.data.results?.[0]?.customer;
+        const c = cr.data.results && cr.data.results[0] && cr.data.results[0].customer;
         if (c) {
           info.name     = c.descriptiveName || ('Customer ' + custId);
           info.currency = c.currencyCode || '';
           info.manager  = !!c.manager;
         }
-      } catch (e) { /* permission denied / not direct → пропускаем имя */ }
+      } catch(e) { /* пропускаем имя */ }
       accounts.push({
         id:                 custId,
         name:               info.name,
@@ -131,14 +151,17 @@ router.get('/google/accounts', requireAdmin, async (req, res) => {
         existing_client_id: existing.get(custId) || null,
       });
     }
-    res.json({ source: 'google', accounts });
+    res.json({ source: 'google', accounts, api_version: version });
   } catch(e) {
-    console.error('[SOURCES GOOGLE]', e.response?.data || e.message);
-    res.status(500).json({ error: 'Ошибка получения списка Google-кабинетов: ' + (e.response?.data?.error?.message || e.message) });
+    const errMsg = (e.response && e.response.data && e.response.data.error && e.response.data.error.message)
+      || (e.response && e.response.data && JSON.stringify(e.response.data).slice(0, 200))
+      || e.message;
+    console.error('[SOURCES GOOGLE]', (e.response && e.response.data) || e.message);
+    res.status(500).json({ error: 'Ошибка получения списка Google-кабинетов: ' + errMsg });
   }
 });
 
-// ════════════════════ TIKTOK ════════════════════
+// ── TikTok
 router.get('/tiktok/accounts', requireAdmin, async (req, res) => {
   try {
     const tok = await getUserToken(req.user.userId, 'tiktok');
@@ -148,12 +171,13 @@ router.get('/tiktok/accounts', requireAdmin, async (req, res) => {
     try {
       const ex = typeof tok.extra === 'string' ? JSON.parse(tok.extra) : (tok.extra || {});
       savedIds = ex.advertiser_ids || [];
-    } catch (e) {}
+    } catch(e) {}
 
-    const existing = await getExistingMap(req.user.userId, 'tiktok', 'tt_account_id');
+    const existing = await getExistingMap(req.user.userId, 'tt_account_id');
     let accounts = [];
+    let warning = '';
 
-    // /oauth2/advertiser/get/ — НЕ требует Ads Management scope
+    // /oauth2/advertiser/get/ — НЕ требует extra scope
     try {
       const r = await axios.get('https://business-api.tiktok.com/open_api/v1.3/oauth2/advertiser/get/', {
         params: {
@@ -175,13 +199,15 @@ router.get('/tiktok/accounts', requireAdmin, async (req, res) => {
           };
         });
       } else {
-        console.warn('[TT] oauth2/advertiser/get returned:', r.data && r.data.message);
+        warning = (r.data && r.data.message) || '';
+        console.warn('[TT] oauth2/advertiser/get returned:', warning);
       }
     } catch (e) {
-      console.warn('[TT] oauth2/advertiser/get failed:', (e.response && e.response.data && e.response.data.message) || e.message);
+      warning = (e.response && e.response.data && e.response.data.message) || e.message;
+      console.warn('[TT] oauth2/advertiser/get failed:', warning);
     }
 
-    // Fallback: используем saved advertiser_ids БЕЗ названий
+    // Fallback: ID без названий, из OAuth response
     if (!accounts.length && savedIds.length) {
       accounts = savedIds.map(id => {
         const sid = String(id);
@@ -189,7 +215,7 @@ router.get('/tiktok/accounts', requireAdmin, async (req, res) => {
           id:                 sid,
           name:               'TikTok Advertiser ' + sid,
           currency:           '',
-          status:             '',
+          status:             'No name (scope limit)',
           already_connected:  existing.has(sid),
           existing_client_id: existing.get(sid) || null,
         };
@@ -197,16 +223,20 @@ router.get('/tiktok/accounts', requireAdmin, async (req, res) => {
     }
 
     if (!accounts.length) {
-      return res.status(400).json({ error: 'TikTok вернул пустой список кабинетов. Переподключите.' });
+      return res.status(400).json({
+        error: 'TikTok вернул пустой список. ' +
+               (warning ? 'Причина: ' + warning : 'Переподключите источник.')
+      });
     }
-    res.json({ source: 'tiktok', accounts });
+    res.json({ source: 'tiktok', accounts, warning: warning || undefined });
   } catch(e) {
-    console.error('[SOURCES TT]', e.response && e.response.data || e.message);
-    res.status(500).json({ error: 'Ошибка получения списка TT-кабинетов: ' + ((e.response && e.response.data && e.response.data.message) || e.message) });
+    console.error('[SOURCES TT]', (e.response && e.response.data) || e.message);
+    res.status(500).json({ error: 'Ошибка получения TT-кабинетов: ' +
+      ((e.response && e.response.data && e.response.data.message) || e.message) });
   }
 });
 
-// GET /api/sources/status — какие источники подключены
+// ── Status
 router.get('/status', async (req, res) => {
   try {
     const r = await query(
@@ -216,8 +246,8 @@ router.get('/status', async (req, res) => {
     const map = {};
     for (const row of r.rows) map[row.source] = { connected: true, expires_at: row.expires_at };
     res.json(map);
-  } catch (e) {
-    res.status(500).json({ error: 'Ошибка сервера' });
+  } catch(e) {
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

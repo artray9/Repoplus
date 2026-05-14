@@ -670,9 +670,10 @@
       <tr>
       <th>Клиент</th>
       <th>Источник</th>
-      <th>Баланс</th>
-      <th>Валюта</th>
-      <th>Лимит расходов</th>
+      <th>К списанию</th>
+      <th>Всего потрачено</th>
+      <th>Лимит / Биллинг</th>
+      <th>След. списание</th>
       <th>Обновлено</th>
       </tr>
       </thead>
@@ -2352,63 +2353,92 @@ async function renderBalancesPage() {
   try {
     const rows = (await apiFetch('/api/analytics/balances')) || [];
     if (!rows.length) {
-      grid.innerHTML = '<div style="color:var(--muted);padding:20px">Нет данных о балансах. Запустите синхронизацию или добавьте токены.</div>';
+      grid.innerHTML = '<div style="color:var(--muted);padding:20px">Нет данных о балансах. Запустите синхронизацию (🔄 Обновить).</div>';
       return;
     }
 
-    // Group by client
     const byClient = {};
     rows.forEach(r => {
       if (!byClient[r.client_id]) byClient[r.client_id] = { name: r.client_name, balances: [] };
       byClient[r.client_id].balances.push(r);
     });
 
-    // Cards
-    const srcColors = { facebook: '#1877F2', tiktok: '#010101', google: '#EA4335' };
-    const srcIcons  = { facebook: '📘', tiktok: '🎵', google: '🔵' };
-    // Google Ads API не отдаёт баланс через GAQL — показываем "n/a" и не считаем в итого
-    const fmtBalance = (b) => {
-      if (b.source === 'google') return '<span style="color:var(--muted)">n/a</span>';
-      const val   = parseFloat(b.balance || 0);
-      const color = val > 0 ? '#10b981' : '#f87171';
-      return `<strong style="color:${color}">${val.toFixed(2)} ${b.currency}</strong>`;
+    const srcIcons = { facebook: '📘', tiktok: '🎵', google: '🔵' };
+    const fmtMoney = (v, cur) => (parseFloat(v) || 0).toFixed(2) + (cur ? ' ' + cur : '');
+    const fmtDate  = (d) => {
+      if (!d) return '—';
+      try { return new Date(d).toLocaleDateString('ru-RU', { day:'numeric', month:'short' }); }
+      catch { return '—'; }
     };
+
+    // Карточки по клиентам — показываем что РЕАЛЬНО важно по FB:
+    // "К списанию" (unbilled), "Потрачено всего", "Следующее списание".
     grid.innerHTML = Object.values(byClient).map(cl => {
-      const totalUSD = cl.balances
-        .filter(b => b.source !== 'google')
-        .reduce((s, b) => s + parseFloat(b.balance || 0), 0);
-      const rows = cl.balances.map(b =>
-        `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
-          <span style="font-size:13px">${srcIcons[b.source] || '💳'} ${b.source}</span>
-          ${fmtBalance(b)}
-        </div>`
-      ).join('');
-      return `<div class="chart-card">
-        <div style="font-weight:700;font-size:15px;margin-bottom:12px">${escHtml(cl.name)}</div>
-        ${rows}
-        <div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px">
-          <span style="color:var(--muted);font-size:12px">Итого</span>
-          <strong>≈${totalUSD.toFixed(2)} USD</strong>
-        </div>
-      </div>`;
+      const lines = cl.balances.map(b => {
+        const isGoogle = b.source === 'google';
+        const isFb     = b.source === 'facebook';
+        let valHtml;
+        if (isGoogle) {
+          valHtml = '<span style="color:var(--muted);font-size:13px">баланс не предоставляется API</span>';
+        } else {
+          const unbilled = parseFloat(b.balance) || 0;
+          const spent    = parseFloat(b.amount_spent) || 0;
+          const cap      = b.spend_cap ? parseFloat(b.spend_cap) : null;
+          const next     = isFb && b.next_bill_date ? fmtDate(b.next_bill_date) : null;
+          const color    = unbilled > 0 ? '#fbbf24' : '#10b981';
+          const lineSpent = spent > 0
+            ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">Всего потрачено: <strong style="color:var(--text)">' + fmtMoney(spent, b.currency) + '</strong></div>'
+            : '';
+          const lineNext  = next
+            ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">Следующее списание: <strong style="color:var(--text)">' + next + '</strong></div>'
+            : '';
+          const lineCap   = cap
+            ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">Лимит аккаунта: <strong style="color:var(--text)">' + fmtMoney(cap, b.currency) + '</strong></div>'
+            : '';
+          valHtml =
+            '<div style="text-align:right">' +
+              '<div><strong style="color:' + color + ';font-size:15px">' + fmtMoney(unbilled, b.currency) + '</strong>' +
+              '<span style="color:var(--muted);font-size:11px;margin-left:6px">к списанию</span></div>' +
+              lineSpent + lineNext + lineCap +
+            '</div>';
+        }
+        return '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);gap:10px">' +
+          '<span style="font-size:13px;padding-top:2px">' + (srcIcons[b.source] || '💳') + ' ' + b.source + '</span>' +
+          valHtml +
+        '</div>';
+      }).join('');
+      return '<div class="chart-card">' +
+        '<div style="font-weight:700;font-size:15px;margin-bottom:6px">' + escHtml(cl.name) + '</div>' +
+        lines +
+      '</div>';
     }).join('');
 
-    // Table
+    // Таблица деталей
     tbody.innerHTML = rows.map(r => {
       const updated = r.fetched_at ? new Date(r.fetched_at).toLocaleString('ru') : '—';
       const isGoogle = r.source === 'google';
-      const balColor = parseFloat(r.balance) > 0 ? '#10b981' : '#f87171';
+      const unbilled = parseFloat(r.balance) || 0;
+      const spent    = parseFloat(r.amount_spent) || 0;
+      const cap      = r.spend_cap ? parseFloat(r.spend_cap) : null;
+      const next     = r.next_bill_date ? fmtDate(r.next_bill_date) : '—';
+
+      const balColor = unbilled > 0 ? '#fbbf24' : '#10b981';
       const balCell  = isGoogle
         ? '<td style="color:var(--muted)">n/a</td>'
-        : `<td style="color:${balColor};font-weight:600">${parseFloat(r.balance||0).toFixed(2)}</td>`;
-      return `<tr>
-        <td><strong>${escHtml(r.client_name)}</strong></td>
-        <td>${srcIcons[r.source] || '💳'} ${r.source}</td>
-        ${balCell}
-        <td>${isGoogle ? '<span style="color:var(--muted)">—</span>' : r.currency}</td>
-        <td style="color:var(--muted)">${r.spend_cap ? parseFloat(r.spend_cap).toFixed(2) : '—'}</td>
-        <td style="color:var(--muted);font-size:12px">${updated}</td>
-      </tr>`;
+        : '<td style="color:' + balColor + ';font-weight:600">' + unbilled.toFixed(2) + ' ' + (r.currency || '') + '</td>';
+      const spentCell = isGoogle || spent === 0
+        ? '<td style="color:var(--muted)">—</td>'
+        : '<td>' + spent.toFixed(2) + ' ' + (r.currency || '') + '</td>';
+      const capCell = cap
+        ? '<td style="color:var(--muted)">' + cap.toFixed(2) + ' ' + (r.currency || '') + '</td>'
+        : '<td style="color:var(--muted)">—</td>';
+      const nextCell = isGoogle ? '<td style="color:var(--muted)">—</td>' : '<td style="color:var(--muted)">' + next + '</td>';
+      return '<tr>' +
+        '<td><strong>' + escHtml(r.client_name) + '</strong></td>' +
+        '<td>' + (srcIcons[r.source] || '💳') + ' ' + r.source + '</td>' +
+        balCell + spentCell + capCell + nextCell +
+        '<td style="color:var(--muted);font-size:12px">' + updated + '</td>' +
+      '</tr>';
     }).join('');
   } catch (e) {
     grid.innerHTML = '<div style="color:var(--red);padding:20px">Ошибка: ' + e.message + '</div>';

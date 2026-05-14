@@ -183,6 +183,9 @@ async function migrate() {
       updated_at    TIMESTAMP DEFAULT NOW(),
       UNIQUE(user_id, source)
     )`);
+    await client.query(`ALTER TABLE account_balances ADD COLUMN IF NOT EXISTS extra JSONB DEFAULT '{}'`);
+    await client.query(`ALTER TABLE account_balances ADD COLUMN IF NOT EXISTS amount_spent NUMERIC DEFAULT 0`);
+    await client.query(`ALTER TABLE account_balances ADD COLUMN IF NOT EXISTS next_bill_date TIMESTAMP`);
     await client.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS meta              JSONB DEFAULT '{}'`);
     await client.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id) ON DELETE SET NULL`);
     await client.query(`ALTER TABLE clients  ADD COLUMN IF NOT EXISTS google_manager_id TEXT`);
