@@ -1,5 +1,5 @@
 /**
- * Google Ads REST API v16 — выгрузка кампаний.
+ * Google Ads REST API v22 — выгрузка кампаний.
  *
  * Multi-tenant: login-customer-id берётся ПО КЛИЕНТУ:
  *   - если у клиента есть MCC (clients.google_manager_id) → используем его
@@ -11,7 +11,7 @@
 const axios  = require('axios');
 const { query } = require('../db');
 
-const GOOGLE_ADS_BASE = 'https://googleads.googleapis.com/v18';
+const GOOGLE_ADS_BASE = 'https://googleads.googleapis.com/v22';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 function getDeveloperToken() {

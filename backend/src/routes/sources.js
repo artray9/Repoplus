@@ -1,8 +1,5 @@
 /**
  * /api/sources — листинг доступных рекламных кабинетов после OAuth discovery.
- *
- * Google Ads API часто меняет версии — пробуем v20 → v19 → v18 → v17,
- * первая что отдала 200 — используется.
  */
 const express = require('express');
 const axios   = require('axios');
@@ -12,7 +9,9 @@ const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const router = express.Router();
 router.use(authMiddleware);
 
-const GOOGLE_API_VERSIONS = ['v20', 'v19', 'v18', 'v17'];
+// Версии Google Ads API пробуем в порядке: v22 → v21 → v20 → v19 → v18 → v17.
+// Первая что вернула 200 — используется.
+const GOOGLE_API_VERSIONS = ['v22', 'v21', 'v20', 'v19', 'v18', 'v17'];
 
 async function getUserToken(userId, source) {
   const r = await query(
@@ -53,7 +52,7 @@ router.get('/facebook/accounts', requireAdmin, async (req, res) => {
       8: 'Pending Settlement', 9: 'In Grace Period', 100: 'Pending Closure',
       101: 'Closed', 201: 'Any Active', 202: 'Any Closed',
     };
-    const accounts = (r.data && r.data.data || []).map(a => {
+    const accounts = ((r.data && r.data.data) || []).map(a => {
       const accId = String(a.account_id).replace(/^act_/, '');
       return {
         id:                  accId,
@@ -74,7 +73,7 @@ router.get('/facebook/accounts', requireAdmin, async (req, res) => {
   }
 });
 
-// ── Google (с fallback по версиям)
+// ── Google: пробуем версии API по очереди
 async function googleListAccessible(accessToken, devToken) {
   let lastErr = null;
   for (const ver of GOOGLE_API_VERSIONS) {
@@ -87,7 +86,6 @@ async function googleListAccessible(accessToken, devToken) {
     } catch(e) {
       lastErr = e;
       const code = e.response && e.response.status;
-      // 404/403 для устаревшей версии — пробуем следующую. Прочие ошибки — пробрасываем.
       if (code !== 404 && code !== 400 && code !== 403) throw e;
       console.warn('[GOOGLE] ' + ver + ' returned ' + code + ', trying next');
     }
@@ -154,7 +152,7 @@ router.get('/google/accounts', requireAdmin, async (req, res) => {
     res.json({ source: 'google', accounts, api_version: version });
   } catch(e) {
     const errMsg = (e.response && e.response.data && e.response.data.error && e.response.data.error.message)
-      || (e.response && e.response.data && JSON.stringify(e.response.data).slice(0, 200))
+      || (e.response && e.response.data && (typeof e.response.data === 'string' ? e.response.data.slice(0, 200) : JSON.stringify(e.response.data).slice(0, 200)))
       || e.message;
     console.error('[SOURCES GOOGLE]', (e.response && e.response.data) || e.message);
     res.status(500).json({ error: 'Ошибка получения списка Google-кабинетов: ' + errMsg });
@@ -177,7 +175,7 @@ router.get('/tiktok/accounts', requireAdmin, async (req, res) => {
     let accounts = [];
     let warning = '';
 
-    // /oauth2/advertiser/get/ — НЕ требует extra scope
+    // /oauth2/advertiser/get/ — обычно НЕ требует extra scope
     try {
       const r = await axios.get('https://business-api.tiktok.com/open_api/v1.3/oauth2/advertiser/get/', {
         params: {
@@ -187,7 +185,7 @@ router.get('/tiktok/accounts', requireAdmin, async (req, res) => {
         },
       });
       if (r.data && r.data.code === 0) {
-        accounts = (r.data.data && r.data.data.list || []).map(a => {
+        accounts = ((r.data.data && r.data.data.list) || []).map(a => {
           const id = String(a.advertiser_id);
           return {
             id,
@@ -207,7 +205,7 @@ router.get('/tiktok/accounts', requireAdmin, async (req, res) => {
       console.warn('[TT] oauth2/advertiser/get failed:', warning);
     }
 
-    // Fallback: ID без названий, из OAuth response
+    // Fallback: ID без названий, из OAuth response (всегда работает)
     if (!accounts.length && savedIds.length) {
       accounts = savedIds.map(id => {
         const sid = String(id);
@@ -215,7 +213,7 @@ router.get('/tiktok/accounts', requireAdmin, async (req, res) => {
           id:                 sid,
           name:               'TikTok Advertiser ' + sid,
           currency:           '',
-          status:             'No name (scope limit)',
+          status:             'no name (нужны permissions в TT App)',
           already_connected:  existing.has(sid),
           existing_client_id: existing.get(sid) || null,
         };
@@ -224,7 +222,7 @@ router.get('/tiktok/accounts', requireAdmin, async (req, res) => {
 
     if (!accounts.length) {
       return res.status(400).json({
-        error: 'TikTok вернул пустой список. ' +
+        error: 'TikTok вернул пустой список кабинетов. ' +
                (warning ? 'Причина: ' + warning : 'Переподключите источник.')
       });
     }
@@ -236,7 +234,7 @@ router.get('/tiktok/accounts', requireAdmin, async (req, res) => {
   }
 });
 
-// ── Status
+// ── Status: какие источники подключены
 router.get('/status', async (req, res) => {
   try {
     const r = await query(
