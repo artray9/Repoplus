@@ -629,6 +629,59 @@
 
 
 
+      <div id="pageUsers" class="page">
+      <div class="page-header">
+      <div class="page-title">👤 Пользователи</div>
+      <button class="btn-primary" onclick="openAddUserModal()">+ Добавить пользователя</button>
+      <button class="btn-secondary" onclick="openInviteModal()" style="margin-left:10px">📧 Пригласить клиента</button>
+      </div>
+      <div id="pendingBlock"></div>
+
+      <div class="table-card">
+      <div style="overflow-x:auto">
+      <table id="usersTable">
+      <thead>
+      <tr>
+      <th>Имя</th>
+      <th>Email</th>
+      <th>Роль</th>
+      <th>Дата регистрации</th>
+      <th>Доступ к клиентам</th>
+      <th>Действия</th>
+      </tr>
+      </thead>
+      <tbody id="usersBody"></tbody>
+      </table>
+      </div>
+      </div>
+      </div>
+
+      <div id="pageBalances" class="page">
+      <div class="page-header">
+      <div class="page-title">💰 Балансы</div>
+      <button class="btn-primary" onclick="refreshBalances()">🔄 Обновить</button>
+      </div>
+      <div id="balancesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;"></div>
+      <div class="table-card" style="margin-top:20px">
+      <div class="table-header-bar"><div class="table-title">Детали по кабинетам</div></div>
+      <div style="overflow-x:auto">
+      <table id="balancesTable">
+      <thead>
+      <tr>
+      <th>Клиент</th>
+      <th>Источник</th>
+      <th>Баланс</th>
+      <th>Валюта</th>
+      <th>Лимит расходов</th>
+      <th>Обновлено</th>
+      </tr>
+      </thead>
+      <tbody id="balancesBody"></tbody>
+      </table>
+      </div>
+      </div>
+      </div>
+
     </div><!-- /mainScroll -->
   </div>
 </div>
@@ -1795,59 +1848,8 @@ function showToast(icon, msg) {
 
 
 <!-- USERS PAGE -->
-<div id="pageUsers" class="page">
-  <div class="page-header">
-    <div class="page-title">👤 Пользователи</div>
-    <button class="btn-primary" onclick="openAddUserModal()">+ Добавить пользователя</button>
-    <button class="btn-secondary" onclick="openInviteModal()" style="margin-left:10px">📧 Пригласить клиента</button>
-  </div>
-  <div id="pendingBlock"></div>
-
-  <div class="table-card">
-    <div style="overflow-x:auto">
-      <table id="usersTable">
-        <thead>
-          <tr>
-            <th>Имя</th>
-            <th>Email</th>
-            <th>Роль</th>
-            <th>Дата регистрации</th>
-            <th>Доступ к клиентам</th>
-            <th>Действия</th>
-          </tr>
-        </thead>
-        <tbody id="usersBody"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
 
 <!-- BALANCES PAGE -->
-<div id="pageBalances" class="page">
-  <div class="page-header">
-    <div class="page-title">💰 Балансы</div>
-    <button class="btn-primary" onclick="refreshBalances()">🔄 Обновить</button>
-  </div>
-  <div id="balancesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;"></div>
-  <div class="table-card" style="margin-top:20px">
-    <div class="table-header-bar"><div class="table-title">Детали по кабинетам</div></div>
-    <div style="overflow-x:auto">
-      <table id="balancesTable">
-        <thead>
-          <tr>
-            <th>Клиент</th>
-            <th>Источник</th>
-            <th>Баланс</th>
-            <th>Валюта</th>
-            <th>Лимит расходов</th>
-            <th>Обновлено</th>
-          </tr>
-        </thead>
-        <tbody id="balancesBody"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
 
 <!-- ADD USER MODAL -->
 <div class="modal-overlay" id="addUserModal" onclick="handleModalClick(event)">

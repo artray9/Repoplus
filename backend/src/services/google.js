@@ -11,7 +11,7 @@
 const axios  = require('axios');
 const { query } = require('../db');
 
-const GOOGLE_ADS_BASE = 'https://googleads.googleapis.com/v16';
+const GOOGLE_ADS_BASE = 'https://googleads.googleapis.com/v18';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 function getDeveloperToken() {
