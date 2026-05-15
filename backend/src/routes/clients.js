@@ -197,5 +197,64 @@ router.post('/bulk', requireAdmin, async (req, res) => {
 });
 
 
+
+// POST /api/clients/:id/merge — слить ЭТОГО клиента в :targetId
+// Body: { into: target_client_uuid }
+router.post('/:id/merge', requireAdmin, async (req, res) => {
+  try {
+    const fromId = req.params.id;
+    const toId   = req.body && req.body.into;
+    if (!toId || fromId === toId) return res.status(400).json({ error: 'Нужен into != id' });
+
+    if (!(await ownsClient(req.user, fromId)) || !(await ownsClient(req.user, toId))) {
+      return res.status(404).json({ error: 'Клиент не найден' });
+    }
+
+    const fromR = await query('SELECT * FROM clients WHERE id=$1', [fromId]);
+    const toR   = await query('SELECT * FROM clients WHERE id=$1', [toId]);
+    if (!fromR.rows.length || !toR.rows.length) return res.status(404).json({ error: 'Клиент не найден' });
+    const from = fromR.rows[0], to = toR.rows[0];
+
+    // Копируем пустые поля from → to
+    await query(
+      `UPDATE clients SET
+         fb_account_id     = COALESCE(fb_account_id, $2),
+         google_account_id = COALESCE(google_account_id, $3),
+         google_manager_id = COALESCE(google_manager_id, $4),
+         tt_account_id     = COALESCE(tt_account_id, $5),
+         amo_subdomain     = COALESCE(amo_subdomain, $6)
+       WHERE id=$1`,
+      [toId, from.fb_account_id, from.google_account_id, from.google_manager_id, from.tt_account_id, from.amo_subdomain]
+    );
+
+    // Переносим integration_tokens (если у to нет такого source)
+    await query(
+      `INSERT INTO integration_tokens (client_id, source, access_token, refresh_token, expires_at, updated_at)
+       SELECT $1, source, access_token, refresh_token, expires_at, NOW()
+       FROM integration_tokens WHERE client_id=$2
+       ON CONFLICT (client_id, source) DO NOTHING`,
+      [toId, fromId]
+    );
+
+    // Переносим метрики и балансы
+    await query(`UPDATE ad_metrics       SET client_id=$1 WHERE client_id=$2`, [toId, fromId]).catch(()=>{});
+    await query(`UPDATE crm_leads        SET client_id=$1 WHERE client_id=$2`, [toId, fromId]).catch(()=>{});
+    await query(`UPDATE account_balances SET client_id=$1 WHERE client_id=$2 AND
+                  NOT EXISTS (SELECT 1 FROM account_balances b2 WHERE b2.client_id=$1 AND b2.source=account_balances.source)`,
+                [toId, fromId]).catch(()=>{});
+    await query(`UPDATE client_access    SET client_id=$1 WHERE client_id=$2 AND
+                  NOT EXISTS (SELECT 1 FROM client_access ca2 WHERE ca2.client_id=$1 AND ca2.user_id=client_access.user_id)`,
+                [toId, fromId]).catch(()=>{});
+
+    // Удаляем source клиента (CASCADE снесёт остатки)
+    await query('DELETE FROM clients WHERE id=$1', [fromId]);
+    res.json({ ok: true, merged_into: toId });
+  } catch (e) {
+    console.error('[CLIENTS MERGE]', e.message);
+    res.status(500).json({ error: 'Ошибка слияния: ' + e.message });
+  }
+});
+
+
 module.exports = router;
 module.exports.ownsClient = ownsClient;

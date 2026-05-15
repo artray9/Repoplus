@@ -493,11 +493,11 @@
               <thead>
                 <tr>
                   <th>Клиент</th>
-                  <th>Аккаунты</th>
+                  <th style="text-align:center">📘 Facebook</th>
+                  <th style="text-align:center">🎯 Google</th>
+                  <th style="text-align:center">🎵 TikTok</th>
+                  <th style="text-align:center">📋 amoCRM</th>
                   <th>Статус</th>
-                  <th style="text-align:center">📘 FB</th>
-                  <th style="text-align:center">🎵 TT</th>
-                  <th style="text-align:center">🎯 GG</th>
                   <th>Действия</th>
                 </tr>
               </thead>
@@ -1382,39 +1382,117 @@ async function renderClientsPage() {
     ? `<td style="text-align:center" title="${title}"><span style="color:#10b981;font-size:16px">✅</span></td>`
     : `<td style="text-align:center" title="Токен не подключён"><span style="color:var(--border);font-size:16px">○</span></td>`;
 
+  // Унифицированная "ячейка источника": ID + чекмарк/крестик токена
+  const sourceCell = (icon, accId, hasToken) => {
+    if (!accId && !hasToken) return '<td style="text-align:center;color:var(--muted)">—</td>';
+    const status = hasToken
+      ? '<span style="color:#10b981;font-size:14px">✓</span>'
+      : '<span style="color:#f87171;font-size:14px">✗</span>';
+    const idShort = accId ? '<div style="font-size:10px;color:var(--muted);font-family:monospace;margin-top:2px">' + escHtml(String(accId)) + '</div>' : '';
+    return '<td style="text-align:center">' + icon + ' ' + status + idShort + '</td>';
+  };
+
   tbody.innerHTML = CLIENTS_FULL.map(c => {
-    const accounts = [
-      c.fb_account_id     ? `<div style="font-size:11px;color:var(--muted)">📘 ${c.fb_account_id}</div>`     : '',
-      c.tt_account_id     ? `<div style="font-size:11px;color:var(--muted)">🎵 ${c.tt_account_id}</div>`     : '',
-      c.google_account_id ? `<div style="font-size:11px;color:var(--muted)">🎯 ${c.google_account_id}</div>` : '',
-    ].filter(Boolean).join('') || '<span style="color:var(--muted);font-size:12px">—</span>';
     const statusBadge = c.active
       ? '<span class="status-badge">● Активен</span>'
       : '<span class="status-badge" style="color:#f87171;border-color:#f87171">● Неактивен</span>';
     return `<tr>
-      <td><b>${c.name}</b></td>
-      <td>${accounts}</td>
+      <td><b>${escHtml(c.name)}</b></td>
+      ${sourceCell('📘', c.fb_account_id,     c.has_facebook_token)}
+      ${sourceCell('🎯', c.google_account_id, c.has_google_token)}
+      ${sourceCell('🎵', c.tt_account_id,     c.has_tiktok_token)}
+      ${sourceCell('📋', c.amo_subdomain,     false)}
       <td>${statusBadge}</td>
-      ${tok(c.has_fb_token,     'Facebook токен')}
-      ${tok(c.has_tt_token,     'TikTok токен')}
-      ${tok(c.has_google_token, 'Google токен')}
-      <td style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn-sm" onclick="openEditClientModal('${c.id}')">✏️</button>
-        <button class="btn-sm" onclick="openTokenModal('${c.id}','${c.name}')">🔑 Токен</button>
-        <button class="btn-danger" onclick="deleteClient('${c.id}','${c.name}')">Удалить</button>
+      <td style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button class="btn-sm" data-id="${c.id}" onclick="openEditClientModal(this.dataset.id)" title="Редактировать">✏️ Изменить</button>
+        <button class="btn-sm" data-id="${c.id}" data-name="${escHtml(c.name)}" onclick="openMergeModal(this.dataset.id,this.dataset.name)" title="Объединить">🔗 Объединить</button>
+        <button class="btn-sm" data-id="${c.id}" data-name="${escHtml(c.name)}" onclick="openTokenModal(this.dataset.id,this.dataset.name)" title="Токен">🔑</button>
+        <button class="btn-danger" data-id="${c.id}" data-name="${escHtml(c.name)}" onclick="deleteClient(this.dataset.id,this.dataset.name)">🗑</button>
       </td>
     </tr>`;
   }).join('');
 }
 
+// ── EDIT CLIENT ──────────────────────────────────────────────
+let _editingClientId = null;
+async function openEditClientModal(clientId) {
+  _editingClientId = clientId;
+  const c = (CLIENTS_FULL || []).find(x => x.id === clientId);
+  if (!c) { showToast('❌', 'Клиент не найден'); return; }
+  document.getElementById('newClientName').value      = c.name || '';
+  document.getElementById('newClientFbId').value      = c.fb_account_id || '';
+  document.getElementById('newClientGoogleId').value  = c.google_account_id || '';
+  document.getElementById('newClientGoogleMgr').value = c.google_manager_id || '';
+  document.getElementById('newClientTtId').value      = c.tt_account_id || '';
+  // токены остаются как есть, очищаем поля manual ввода
+  ['newClientFbToken','newClientGoogleToken','newClientTtToken'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  populateKeyDropdowns();
+  document.getElementById('modalError').style.display = 'none';
+  // Меняем заголовок модалки и текст кнопки на "Сохранить"
+  const titleEl = document.querySelector('#addClientModal .modal-title');
+  if (titleEl) titleEl.textContent = '✏️ Редактировать: ' + c.name;
+  document.getElementById('modalSaveBtn').textContent = 'Сохранить';
+  document.getElementById('addClientModal').classList.add('show');
+}
+
+// ── MERGE CLIENTS ────────────────────────────────────────────
+let _mergeFromId = null;
+function openMergeModal(fromId, fromName) {
+  _mergeFromId = fromId;
+  const others = (CLIENTS_FULL || []).filter(c => c.id !== fromId);
+  if (!others.length) { showToast('⚠️', 'Нет других клиентов для слияния'); return; }
+  document.getElementById('mergeFromName').textContent = fromName;
+  const sel = document.getElementById('mergeIntoSelect');
+  sel.innerHTML = '<option value="">— Выберите клиента —</option>';
+  others.forEach(c => {
+    const sources = [];
+    if (c.fb_account_id)     sources.push('FB');
+    if (c.google_account_id) sources.push('Google');
+    if (c.tt_account_id)     sources.push('TT');
+    const meta = sources.length ? ' (' + sources.join(', ') + ')' : '';
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.name + meta;
+    sel.appendChild(opt);
+  });
+  document.getElementById('mergeModal').classList.add('active');
+}
+
+async function submitMerge() {
+  const intoId = document.getElementById('mergeIntoSelect').value;
+  if (!intoId) { showToast('⚠️', 'Выберите целевого клиента'); return; }
+  const btn = document.getElementById('mergeSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Объединяю...';
+  try {
+    await apiFetch('/api/clients/' + _mergeFromId + '/merge', {
+      method: 'POST',
+      body: JSON.stringify({ into: intoId }),
+    });
+    showToast('✅', 'Клиенты объединены');
+    document.getElementById('mergeModal').classList.remove('active');
+    renderClientsPage();
+    loadClients();
+  } catch(e) {
+    showToast('❌', e.message || 'Ошибка слияния');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Объединить';
+  }
+}
+
 // ── ADD CLIENT ────────────────────────────────────────────────
 function openAddClientModal() {
+  _editingClientId = null;
   ['newClientName','newClientFbId','newClientFbToken','newClientGoogleId','newClientGoogleMgr','newClientGoogleToken','newClientTtId','newClientTtToken'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
   populateKeyDropdowns();
   document.getElementById('modalError').style.display = 'none';
+  const titleEl = document.querySelector('#addClientModal .modal-title');
+  if (titleEl) titleEl.textContent = '+ Новый клиент';
+  document.getElementById('modalSaveBtn').textContent = 'Сохранить';
   document.getElementById('addClientModal').classList.add('show');
 }
 function closeAddClientModal() {
@@ -1462,19 +1540,30 @@ async function submitAddClient() {
   errEl.style.display = 'none';
 
   try {
-    const created = await apiFetch('/api/clients', {
-      method: 'POST',
-      body: JSON.stringify({
-        name,
-        fb_account_id:     fbId      || null,
-        google_account_id: googleId  || null,
-        google_manager_id: googleMgr || null,
-        tt_account_id:     ttId      || null,
-      }),
-    });
+    const payload = {
+      name,
+      fb_account_id:     fbId      || null,
+      google_account_id: googleId  || null,
+      google_manager_id: googleMgr || null,
+      tt_account_id:     ttId      || null,
+    };
 
-    // Helper: apply key or manual token — каждый источник изолирован,
-    // чтобы ошибка на одном не убивала остальные.
+    let target;
+    if (_editingClientId) {
+      // Режим редактирования — PATCH существующего
+      target = await apiFetch('/api/clients/' + _editingClientId, {
+        method: 'PATCH',
+        body:   JSON.stringify(payload),
+      });
+    } else {
+      // Создание нового
+      target = await apiFetch('/api/clients', {
+        method: 'POST',
+        body:   JSON.stringify(payload),
+      });
+    }
+
+    // Apply tokens (для обоих режимов: и create, и edit)
     async function saveToken(source, keySelId, manualInputId) {
       const keyId  = document.getElementById(keySelId)?.value;
       const manual = document.getElementById(manualInputId)?.value.trim();
@@ -1482,17 +1571,17 @@ async function submitAddClient() {
         if (keyId) {
           await apiFetch('/api/settings/apply-key', {
             method: 'POST',
-            body: JSON.stringify({ api_key_id: keyId, client_id: created.id }),
+            body: JSON.stringify({ api_key_id: keyId, client_id: target.id }),
           });
         } else if (manual) {
           await apiFetch('/api/integrations/token', {
             method: 'POST',
-            body: JSON.stringify({ client_id: created.id, source, access_token: manual }),
+            body: JSON.stringify({ client_id: target.id, source, access_token: manual }),
           });
         }
       } catch(e) {
-        console.warn(`[saveToken/${source}]`, e.message);
-        showToast('⚠️', `Токен ${source} не сохранён: ${e.message}`);
+        console.warn('[saveToken/' + source + ']', e.message);
+        showToast('⚠️', 'Токен ' + source + ' не сохранён: ' + e.message);
       }
     }
 
@@ -1501,7 +1590,10 @@ async function submitAddClient() {
     await saveToken('tiktok',   'newClientTtKeyId',     'newClientTtToken');
 
     closeAddClientModal();
-    showToast('✅', `Клиент "${name}" добавлен`);
+    showToast('✅', _editingClientId
+      ? 'Клиент "' + name + '" обновлён'
+      : 'Клиент "' + name + '" добавлен');
+    _editingClientId = null;
     renderClientsPage();
     loadClients();
   } catch(e) {
@@ -2046,6 +2138,29 @@ function showToast(icon, msg) {
   </div>
 </div>
 
+<!-- MERGE CLIENTS MODAL -->
+<div class="modal-overlay" id="mergeModal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title">🔗 Объединить клиента</div>
+    <div style="color:var(--sub);font-size:13px;margin-bottom:14px;line-height:1.5">
+      Клиент <strong style="color:var(--text)" id="mergeFromName"></strong> будет
+      <span style="color:#f87171">удалён</span>, а все его аккаунты, токены и метрики
+      перенесены в выбранного клиента ниже.
+    </div>
+    <div class="form-field">
+      <label class="form-label">Объединить с *</label>
+      <select class="form-input" id="mergeIntoSelect">
+        <option value="">— Выберите клиента —</option>
+      </select>
+      <div class="form-hint">У целевого клиента появятся ID и токены этого. Если у обоих были FB — приоритет у целевого.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('mergeModal').classList.remove('active')">Отмена</button>
+      <button class="btn-primary" id="mergeSubmitBtn" onclick="submitMerge()">Объединить</button>
+    </div>
+  </div>
+</div>
+
 <!-- INVITE CLIENT MODAL -->
 <div class="modal-overlay" id="inviteModal" onclick="if(event.target===this)this.classList.remove('active')">
   <div class="modal" style="max-width:480px">
@@ -2506,7 +2621,7 @@ async function renderTelegramSettings() {
       tbody.innerHTML = subs.map(s => {
         const types = (s.notification_types || []).map(t => {
           const found = TG_NOTIFICATION_TYPES.find(x => x.value === t);
-          return '<span style="background:var(--bg-dark);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:10px;white-space:nowrap">' + (found ? found.label : t) + '</span>';
+          return '<span style="background:var(--bg-dark);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:10px">' + (found ? found.label : t) + '</span>';
         }).join(' ');
         const statusColor = s.active ? '#10b981' : '#f87171';
         return '<tr>' +
@@ -2515,9 +2630,9 @@ async function renderTelegramSettings() {
           '<td style="max-width:280px">' + types + '</td>' +
           '<td><span style="color:' + statusColor + ';font-size:12px">' + (s.active ? '✅ Активен' : '⏸ Пауза') + '</span></td>' +
           '<td>' +
-            '<button class="act-btn" onclick="testTgMessage(\'' + s.chat_id + '\')" title="Тест">🔔</button> ' +
-            '<button class="act-btn" onclick="toggleSubscriber(\'' + s.id + '\',' + (!s.active) + ')" title="' + (s.active ? 'Пауза' : 'Активировать') + '">' + (s.active ? '⏸' : '▶️') + '</button> ' +
-            '<button class="act-btn" style="color:var(--red)" onclick="deleteSubscriber(\'' + s.id + '\')">🗑️</button>' +
+            '<button class="act-btn" data-cid="' + s.chat_id + '" onclick="testTgMessage(this.dataset.cid)">🔔</button> ' +
+            '<button class="act-btn" data-sid="' + s.id + '" data-act="' + (!s.active) + '" onclick="toggleSubscriber(this.dataset.sid,this.dataset.act===\'true\')">' + (s.active ? '⏸' : '▶️') + '</button> ' +
+            '<button class="act-btn" style="color:var(--red)" data-sid="' + s.id + '" onclick="deleteSubscriber(this.dataset.sid)">🗑️</button>' +
           '</td>' +
         '</tr>';
       }).join('');
