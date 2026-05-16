@@ -249,4 +249,22 @@ router.get('/status', async (req, res) => {
   }
 });
 
+
+// DELETE /api/sources/:source — отключает источник (удаляет user_oauth_tokens).
+// Юзер потом проходит OAuth заново и получает свежий токен с актуальными scope.
+router.delete('/:source', async (req, res) => {
+  try {
+    const { source } = req.params;
+    if (!['facebook','google','tiktok'].includes(source)) {
+      return res.status(400).json({ error: 'Неизвестный source' });
+    }
+    await query('DELETE FROM user_oauth_tokens WHERE user_id=$1 AND source=$2',
+      [req.user.userId, source]);
+    res.json({ ok: true, source });
+  } catch(e) {
+    res.status(500).json({ error: 'Ошибка отключения: ' + e.message });
+  }
+});
+
+
 module.exports = router;

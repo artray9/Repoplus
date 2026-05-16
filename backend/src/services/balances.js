@@ -25,35 +25,52 @@ function fromMinorUnits(value, currency) {
   return v / 100;
 }
 
+// FB AdAccount fields в v20 строго регламентированы. Если хоть одно поле невалидно
+// или недоступно — весь запрос ловит 400. Поэтому идём по двум попыткам:
+// 1) Подробный набор полей (если FB одобрит) — даст amount_spent, funding source, etc
+// 2) Минимальный fallback — только balance/currency/spend_cap/amount_spent/status
 async function getFacebookBalance(adAccountId, accessToken) {
   const accountId = adAccountId.startsWith('act_') ? adAccountId : ('act_' + adAccountId);
-  const resp = await axios.get(`${FB_BASE}/${accountId}`, {
-    params: {
-      fields: [
-        'balance',
-        'currency',
-        'spend_cap',
-        'amount_spent',
-        'account_status',
-        'next_bill_date',
-        'min_daily_budget',
-        'funding_source_details',
-      ].join(','),
-      access_token: accessToken,
-    },
-  });
-  const d = resp.data;
-  if (d.error) throw new Error('FB Balance API: ' + d.error.message);
 
-  const currency = d.currency || 'USD';
+  const FIELD_TIERS = [
+    // Расширенный (со всеми bonus полями)
+    'balance,currency,spend_cap,amount_spent,account_status,funding_source_details,timezone_name',
+    // Минимальный safe-set — точно работает в v20
+    'balance,currency,spend_cap,amount_spent,account_status',
+  ];
+
+  let lastError = null;
+  let data = null;
+  for (const fields of FIELD_TIERS) {
+    try {
+      const resp = await axios.get(`${FB_BASE}/${accountId}`, {
+        params: { fields, access_token: accessToken },
+      });
+      if (resp.data && resp.data.error) {
+        lastError = new Error('FB Balance API: ' + resp.data.error.message);
+        continue;
+      }
+      data = resp.data;
+      break;
+    } catch(e) {
+      const errMsg = (e.response && e.response.data && e.response.data.error && e.response.data.error.message)
+        || e.message;
+      lastError = new Error('FB Balance API: ' + errMsg);
+      console.warn('[FB BAL] tier failed (' + fields.slice(0, 40) + '...):', errMsg);
+      // Пробуем следующий tier
+    }
+  }
+  if (!data) throw lastError || new Error('FB Balance API: all field tiers failed');
+
+  const currency = data.currency || 'USD';
   return {
-    balance:        fromMinorUnits(d.balance, currency),
+    balance:        fromMinorUnits(data.balance, currency),
     currency,
-    spend_cap:      d.spend_cap && d.spend_cap !== '0' ? fromMinorUnits(d.spend_cap, currency) : null,
-    amount_spent:   fromMinorUnits(d.amount_spent, currency),
-    next_bill_date: d.next_bill_date || null,
-    funding_source: d.funding_source_details ? (d.funding_source_details.display_string || '') : '',
-    account_status: d.account_status || 0,
+    spend_cap:      data.spend_cap && data.spend_cap !== '0' ? fromMinorUnits(data.spend_cap, currency) : null,
+    amount_spent:   fromMinorUnits(data.amount_spent, currency),
+    next_bill_date: null, // not reliably available
+    funding_source: data.funding_source_details ? (data.funding_source_details.display_string || '') : '',
+    account_status: data.account_status || 0,
   };
 }
 

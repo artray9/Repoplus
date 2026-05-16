@@ -98,6 +98,14 @@
       cursor: pointer; outline: none; transition: border-color .2s;
     }
     select:focus, input[type=date]:focus { border-color: var(--accent); }
+    /* Тёмный фон для dropdown options (нативный <select> по умолчанию подхватывает светлую тему ОС) */
+    select option, select optgroup {
+      background: #1E293B; color: #F1F5F9;
+      padding: 8px 12px;
+    }
+    select option:checked, select option:hover {
+      background: #6C63FF; color: #fff;
+    }
     .source-tabs { display: flex; gap: 4px; }
     .source-tab {
       padding: 7px 14px; border-radius: 7px; font-size: 13px; font-weight: 500;
@@ -1439,36 +1447,72 @@ async function openEditClientModal(clientId) {
 
 // ── MERGE CLIENTS ────────────────────────────────────────────
 let _mergeFromId = null;
+let _mergeIntoId = null;
+let _mergeCandidates = [];
+
 function openMergeModal(fromId, fromName) {
   _mergeFromId = fromId;
-  const others = (CLIENTS_FULL || []).filter(c => c.id !== fromId);
-  if (!others.length) { showToast('⚠️', 'Нет других клиентов для слияния'); return; }
+  _mergeIntoId = null;
+  _mergeCandidates = (CLIENTS_FULL || []).filter(c => c.id !== fromId);
+  if (!_mergeCandidates.length) { showToast('⚠️', 'Нет других клиентов для слияния'); return; }
   document.getElementById('mergeFromName').textContent = fromName;
-  const sel = document.getElementById('mergeIntoSelect');
-  sel.innerHTML = '<option value="">— Выберите клиента —</option>';
-  others.forEach(c => {
-    const sources = [];
-    if (c.fb_account_id)     sources.push('FB');
-    if (c.google_account_id) sources.push('Google');
-    if (c.tt_account_id)     sources.push('TT');
-    const meta = sources.length ? ' (' + sources.join(', ') + ')' : '';
-    const opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.name + meta;
-    sel.appendChild(opt);
-  });
+  document.getElementById('mergeSearchInput').value = '';
+  document.getElementById('mergeSubmitBtn').disabled = true;
+  document.getElementById('mergeSubmitBtn').textContent = 'Выберите клиента ↑';
+  renderMergeList();
   document.getElementById('mergeModal').classList.add('active');
 }
 
+function renderMergeList() {
+  const q = (document.getElementById('mergeSearchInput').value || '').toLowerCase().trim();
+  const box = document.getElementById('mergeListBox');
+  const filtered = _mergeCandidates.filter(c => {
+    if (!q) return true;
+    return (c.name || '').toLowerCase().includes(q)
+        || (c.fb_account_id || '').toString().includes(q)
+        || (c.google_account_id || '').toString().includes(q)
+        || (c.tt_account_id || '').toString().includes(q);
+  });
+  if (!filtered.length) {
+    box.innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">Ничего не найдено</div>';
+    return;
+  }
+  box.innerHTML = filtered.map(c => {
+    const badges = [];
+    if (c.fb_account_id)     badges.push('<span style="background:#1877F222;color:#60a5fa;border-radius:4px;padding:1px 6px;font-size:10px">📘 FB</span>');
+    if (c.google_account_id) badges.push('<span style="background:#EA433522;color:#fca5a5;border-radius:4px;padding:1px 6px;font-size:10px">🎯 Google</span>');
+    if (c.tt_account_id)     badges.push('<span style="background:#88888822;color:#94a3b8;border-radius:4px;padding:1px 6px;font-size:10px">🎵 TT</span>');
+    if (c.amo_subdomain)     badges.push('<span style="background:#00baff22;color:#67e8f9;border-radius:4px;padding:1px 6px;font-size:10px">📋 amoCRM</span>');
+    const selected = _mergeIntoId === c.id;
+    const bg = selected ? 'rgba(108,99,255,0.15)' : 'transparent';
+    const border = selected ? '2px solid var(--accent)' : '1px solid transparent';
+    return '<div data-id="' + c.id + '" onclick="selectMergeTarget(this.dataset.id)" ' +
+      'style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;background:' + bg + ';border-left:' + border + ';transition:all .15s">' +
+      '<div style="font-weight:600;font-size:14px;margin-bottom:4px">' + escHtml(c.name) + '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:4px">' + (badges.join('') || '<span style="font-size:10px;color:var(--muted)">нет подключённых источников</span>') + '</div>' +
+      '</div>';
+  }).join('');
+}
+
+function selectMergeTarget(id) {
+  _mergeIntoId = id;
+  const c = _mergeCandidates.find(x => x.id === id);
+  const btn = document.getElementById('mergeSubmitBtn');
+  if (c) {
+    btn.disabled = false;
+    btn.textContent = 'Объединить в "' + (c.name || '').slice(0, 24) + '"';
+  }
+  renderMergeList();
+}
+
 async function submitMerge() {
-  const intoId = document.getElementById('mergeIntoSelect').value;
-  if (!intoId) { showToast('⚠️', 'Выберите целевого клиента'); return; }
+  if (!_mergeIntoId) { showToast('⚠️', 'Выберите целевого клиента'); return; }
   const btn = document.getElementById('mergeSubmitBtn');
   btn.disabled = true; btn.textContent = 'Объединяю...';
   try {
     await apiFetch('/api/clients/' + _mergeFromId + '/merge', {
       method: 'POST',
-      body: JSON.stringify({ into: intoId }),
+      body: JSON.stringify({ into: _mergeIntoId }),
     });
     showToast('✅', 'Клиенты объединены');
     document.getElementById('mergeModal').classList.remove('active');
@@ -1476,7 +1520,6 @@ async function submitMerge() {
     loadClients();
   } catch(e) {
     showToast('❌', e.message || 'Ошибка слияния');
-  } finally {
     btn.disabled = false; btn.textContent = 'Объединить';
   }
 }
@@ -1661,10 +1704,16 @@ function connectOAuth() {
 let _discoverAccounts = [];
 let _discoverSource   = null;
 
-function connectSource(source) {
+async function connectSource(source) {
   const jwt = localStorage.getItem('rp_access_token') || '';
   if (!jwt) { showToast('⚠️', 'Сначала войдите'); return; }
-  window.location.href = `${API_BASE_URL}/api/oauth/${source}/connect-init?token=${encodeURIComponent(jwt)}`;
+  // Удаляем старый токен (если есть) чтобы прошёл свежий OAuth
+  // с актуальным scope. Без этого TikTok/Google могут переиспользовать
+  // старую сессию без переспроса scope.
+  try {
+    await apiFetch('/api/sources/' + source, { method: 'DELETE' });
+  } catch(e) { /* ничего — может токена и не было */ }
+  window.location.href = API_BASE_URL + '/api/oauth/' + source + '/connect-init?token=' + encodeURIComponent(jwt);
 }
 
 async function openDiscoverModal(source) {
@@ -2140,23 +2189,22 @@ function showToast(icon, msg) {
 
 <!-- MERGE CLIENTS MODAL -->
 <div class="modal-overlay" id="mergeModal" onclick="if(event.target===this)this.classList.remove('active')">
-  <div class="modal" style="max-width:520px">
+  <div class="modal" style="max-width:560px;display:flex;flex-direction:column;max-height:85vh">
     <div class="modal-title">🔗 Объединить клиента</div>
     <div style="color:var(--sub);font-size:13px;margin-bottom:14px;line-height:1.5">
       Клиент <strong style="color:var(--text)" id="mergeFromName"></strong> будет
-      <span style="color:#f87171">удалён</span>, а все его аккаунты, токены и метрики
-      перенесены в выбранного клиента ниже.
+      <span style="color:#f87171">удалён</span>, а его аккаунты/токены/метрики перенесены
+      в выбранного клиента ниже.
     </div>
-    <div class="form-field">
-      <label class="form-label">Объединить с *</label>
-      <select class="form-input" id="mergeIntoSelect">
-        <option value="">— Выберите клиента —</option>
-      </select>
-      <div class="form-hint">У целевого клиента появятся ID и токены этого. Если у обоих были FB — приоритет у целевого.</div>
+    <div class="form-field" style="margin-bottom:8px">
+      <label class="form-label">Найти клиента</label>
+      <input class="form-input" id="mergeSearchInput" placeholder="🔎 Начните печатать имя или ID..." oninput="renderMergeList()" autocomplete="off"/>
     </div>
+    <div id="mergeListBox" style="flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:10px;max-height:42vh;min-height:160px;background:rgba(255,255,255,0.02)"></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">У целевого клиента появятся ID и токены этого. Если у обоих были FB — приоритет у целевого.</div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="document.getElementById('mergeModal').classList.remove('active')">Отмена</button>
-      <button class="btn-primary" id="mergeSubmitBtn" onclick="submitMerge()">Объединить</button>
+      <button class="btn-primary" id="mergeSubmitBtn" onclick="submitMerge()" disabled>Выберите клиента ↑</button>
     </div>
   </div>
 </div>
@@ -2599,20 +2647,13 @@ async function renderTelegramSettings() {
       block.innerHTML = '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">' +
         '<div style="background:#10b98122;border:1px solid #10b981;border-radius:8px;padding:8px 16px;display:flex;align-items:center;gap:8px">' +
         '<span style="color:#10b981;font-size:18px">✅</span>' +
-        '<div>' +
-        '<div style="font-weight:600;font-size:13px">@' + cfg.bot_username + '</div>' +
-        '<div style="color:var(--muted);font-size:11px">Токен: ' + cfg.bot_token_preview + ' · ' + cfg.subscriber_count + ' подписчик(ов)</div>' +
-        '</div></div>' +
+        '<div><div style="font-weight:600;font-size:13px">@' + cfg.bot_username + '</div>' +
+        '<div style="color:var(--muted);font-size:11px">Токен: ' + cfg.bot_token_preview + ' · ' + cfg.subscriber_count + ' подписчик(ов)</div></div></div>' +
         '<button class="btn-cancel" onclick="openBotTokenModal()" style="font-size:12px">🔄 Сменить токен</button></div>';
     } else {
       block.innerHTML = '<div style="display:flex;align-items:center;gap:12px;padding:4px 0">' +
         '<span style="color:var(--muted)">Бот не подключён</span>' +
-        '<button class="btn-primary" onclick="openBotTokenModal()" style="font-size:12px;padding:6px 14px">🤖 Подключить бота</button></div>' +
-        '<div style="margin-top:10px;font-size:12px;color:var(--muted)">' +
-        '1. Создайте бота через <b>@BotFather</b> → /newbot<br>' +
-        '2. Скопируйте токен<br>' +
-        '3. Нажмите «Подключить бота» и вставьте токен<br>' +
-        '4. Добавьте бота в нужный чат/группу и получите chat_id</div>';
+        '<button class="btn-primary" onclick="openBotTokenModal()" style="font-size:12px;padding:6px 14px">🤖 Подключить бота</button></div>';
     }
 
     if (!subs || !subs.length) {
