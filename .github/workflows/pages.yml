@@ -4,9 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'index.html'
-      - 'dashboard.html'
-      - 'assets/**'
+      - 'dashboard/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -34,8 +32,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Деплоим только фронтенд (корень репо, без backend/)
-          path: '.'
+          # Публикуем только веб-фронтенд из dashboard/
+          path: 'dashboard'
 
       - name: Deploy to GitHub Pages
         id: deployment
