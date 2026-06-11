@@ -12,6 +12,7 @@ const express = require('express');
 const axios   = require('axios');
 const jwt     = require('jsonwebtoken');
 const { query } = require('../db');
+const { encrypt } = require('../lib/crypto');
 
 const router = express.Router();
 
@@ -47,7 +48,7 @@ async function saveUserToken(userId, source, accessToken, refreshToken, expiresA
        expires_at=$5,
        extra=$6,
        updated_at=NOW()`,
-    [userId, source, accessToken, refreshToken || null, expiresAt || null, JSON.stringify(extra || {})]
+    [userId, source, encrypt(accessToken), encrypt(refreshToken) || null, expiresAt || null, JSON.stringify(extra || {})]
   );
 }
 
@@ -59,7 +60,7 @@ async function saveClientToken(clientId, source, accessToken, refreshToken, expi
        access_token=$3,
        refresh_token=COALESCE($4, integration_tokens.refresh_token),
        expires_at=$5, updated_at=NOW()`,
-    [clientId, source, accessToken, refreshToken || null, expiresAt || null]
+    [clientId, source, encrypt(accessToken), encrypt(refreshToken) || null, expiresAt || null]
   );
 }
 

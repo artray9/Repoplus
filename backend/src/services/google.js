@@ -10,6 +10,7 @@
  */
 const axios  = require('axios');
 const { query } = require('../db');
+const { decrypt } = require('../lib/crypto');
 
 const GOOGLE_ADS_BASE = 'https://googleads.googleapis.com/v22';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -112,7 +113,7 @@ async function syncClientGoogle(client, dateFrom, dateTo) {
     return 0;
   }
 
-  const { refresh_token } = tokenRes.rows[0];
+  const refresh_token = decrypt(tokenRes.rows[0].refresh_token);
   if (!refresh_token) {
     console.warn('[GOOGLE] No refresh_token for ' + client.name);
     return 0;

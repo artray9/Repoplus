@@ -4,6 +4,7 @@
 const express = require('express');
 const axios   = require('axios');
 const { query } = require('../db');
+const { decrypt } = require('../lib/crypto');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
@@ -18,7 +19,12 @@ async function getUserToken(userId, source) {
     'SELECT * FROM user_oauth_tokens WHERE user_id=$1 AND source=$2',
     [userId, source]
   );
-  return r.rows[0] || null;
+  const row = r.rows[0] || null;
+  if (row) {
+    row.access_token  = decrypt(row.access_token);
+    row.refresh_token = decrypt(row.refresh_token);
+  }
+  return row;
 }
 
 async function getExistingMap(userId, fieldName) {

@@ -1,5 +1,6 @@
 const express  = require('express');
 const { query } = require('../db');
+const { encrypt } = require('../lib/crypto');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { dailySync } = require('../jobs/sync');
 const { syncClientFacebook } = require('../services/facebook');
@@ -41,7 +42,7 @@ router.post('/token', requireAdmin, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,NOW())
        ON CONFLICT (client_id, source)
        DO UPDATE SET access_token=$3, refresh_token=$4, expires_at=$5, updated_at=NOW()`,
-      [client_id, source, access_token, refresh_token || null, expires_at || null]
+      [client_id, source, encrypt(access_token), encrypt(refresh_token) || null, expires_at || null]
     );
     res.json({ ok: true });
   } catch (e) {

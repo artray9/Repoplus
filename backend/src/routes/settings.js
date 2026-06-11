@@ -6,11 +6,18 @@
  */
 const express   = require('express');
 const { query } = require('../db');
+const { encrypt, preview } = require('../lib/crypto');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(authMiddleware);
 router.use(requireAdmin);
+
+// Убирает токен из ответа, заменяя его безопасным превью.
+function sanitizeKey(row) {
+  const { access_token, ...rest } = row;
+  return { ...rest, token_preview: preview(access_token) };
+}
 
 function ownerFilter(role, userId, paramIdx) {
   // superadmin → нет фильтра; admin → owner_id = userId (или NULL для legacy)
@@ -25,17 +32,17 @@ router.get('/api-keys', async (req, res) => {
     let sql, params;
     if (role === 'superadmin') {
       sql = `SELECT id, name, source, expires_at, created_at, updated_at, owner_id,
-             LEFT(access_token, 10) || '...' AS token_preview
+             access_token
              FROM api_keys ORDER BY source, name`;
       params = [];
     } else {
       sql = `SELECT id, name, source, expires_at, created_at, updated_at, owner_id,
-             LEFT(access_token, 10) || '...' AS token_preview
+             access_token
              FROM api_keys WHERE owner_id = $1 ORDER BY source, name`;
       params = [userId];
     }
     const result = await query(sql, params);
-    res.json(result.rows);
+    res.json(result.rows.map(sanitizeKey));
   } catch (e) {
     console.error('[SETTINGS GET]', e.message);
     res.status(500).json({ error: 'Ошибка сервера' });
@@ -52,11 +59,10 @@ router.post('/api-keys', async (req, res) => {
     const result = await query(
       `INSERT INTO api_keys (name, source, access_token, expires_at, owner_id, updated_at)
        VALUES ($1, $2, $3, $4, $5, NOW())
-       RETURNING id, name, source, expires_at, created_at, updated_at, owner_id,
-         LEFT(access_token, 10) || '...' AS token_preview`,
-      [name, source, access_token, expires_at || null, req.user.userId]
+       RETURNING id, name, source, expires_at, created_at, updated_at, owner_id, access_token`,
+      [name, source, encrypt(access_token), expires_at || null, req.user.userId]
     );
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(sanitizeKey(result.rows[0]));
   } catch (e) {
     console.error('[SETTINGS POST]', e.message);
     res.status(500).json({ error: 'Ошибка сервера' });

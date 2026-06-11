@@ -3,6 +3,7 @@
  */
 const axios  = require('axios');
 const { query } = require('../db');
+const { decrypt } = require('../lib/crypto');
 
 const TT_BASE = 'https://business-api.tiktok.com/open_api/v1.3';
 
@@ -67,7 +68,7 @@ async function syncClientTikTok(client, dateFrom, dateTo) {
     console.warn('[TT] No token for client ' + client.name);
     return 0;
   }
-  const token = tokenRes.rows[0].access_token;
+  const token = decrypt(tokenRes.rows[0].access_token);
 
   if (!dateFrom || !dateTo) {
     const today = new Date();

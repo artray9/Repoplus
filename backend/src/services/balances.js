@@ -9,6 +9,7 @@
  */
 const axios   = require('axios');
 const { query } = require('../db');
+const { decrypt } = require('../lib/crypto');
 
 const FB_BASE = 'https://graph.facebook.com/v20.0';
 const TT_BASE = 'https://business-api.tiktok.com/open_api/v1.3';
@@ -112,7 +113,7 @@ async function syncClientBalances(client) {
         [client.id, 'facebook']
       );
       if (tokenRes.rows.length) {
-        const bal = await getFacebookBalance(client.fb_account_id, tokenRes.rows[0].access_token);
+        const bal = await getFacebookBalance(client.fb_account_id, decrypt(tokenRes.rows[0].access_token));
         const extra = {
           funding_source: bal.funding_source || null,
           account_status: bal.account_status || 0,
@@ -147,7 +148,7 @@ async function syncClientBalances(client) {
         [client.id, 'tiktok']
       );
       if (tokenRes.rows.length) {
-        const bal = await getTikTokBalance(client.tt_account_id, tokenRes.rows[0].access_token);
+        const bal = await getTikTokBalance(client.tt_account_id, decrypt(tokenRes.rows[0].access_token));
         if (!bal.scope_error) {
           await query(
             `INSERT INTO account_balances

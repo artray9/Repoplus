@@ -10,6 +10,7 @@
  */
 const axios  = require('axios');
 const { query } = require('../db');
+const { decrypt } = require('../lib/crypto');
 
 const FB_API_VER = 'v20.0';
 const FB_BASE    = `https://graph.facebook.com/${FB_API_VER}`;
@@ -158,7 +159,7 @@ async function syncClientFacebook(client, dateFrom, dateTo) {
     return 0;
   }
 
-  const token = tokenRes.rows[0].access_token;
+  const token = decrypt(tokenRes.rows[0].access_token);
 
   if (!dateFrom || !dateTo) {
     const today = new Date();

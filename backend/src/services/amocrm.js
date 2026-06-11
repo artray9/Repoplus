@@ -5,6 +5,7 @@
  */
 const axios  = require('axios');
 const { query } = require('../db');
+const { encrypt, decrypt } = require('../lib/crypto');
 
 // ── OAuth2 helpers ────────────────────────────────────────────
 
@@ -39,6 +40,8 @@ async function getValidToken(clientId) {
   if (!res.rows.length) return null;
 
   const row = res.rows[0];
+  row.access_token  = decrypt(row.access_token);
+  row.refresh_token = decrypt(row.refresh_token);
 
   // Если нет expires_at или токен живёт > 1ч — используем как есть
   if (!row.expires_at) return row.access_token;
@@ -74,7 +77,7 @@ async function getValidToken(clientId) {
       `UPDATE integration_tokens
        SET access_token=$1, refresh_token=$2, expires_at=$3, updated_at=NOW()
        WHERE client_id=$4 AND source='amocrm'`,
-      [newTokens.access_token, newTokens.refresh_token || row.refresh_token, newExpires, clientId]
+      [encrypt(newTokens.access_token), encrypt(newTokens.refresh_token || row.refresh_token), newExpires, clientId]
     );
     console.log('[AMO] Token refreshed, new expires:', newExpires.toISOString());
     return newTokens.access_token;
