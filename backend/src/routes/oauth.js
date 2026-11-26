@@ -11,13 +11,38 @@
 const express = require('express');
 const axios   = require('axios');
 const jwt     = require('jsonwebtoken');
+const crypto  = require('crypto');
+const rateLimit = require('express-rate-limit');
 const { query } = require('../db');
-const { encrypt } = require('../lib/crypto');
+const { encrypt, decrypt } = require('../lib/crypto');
 
 const router = express.Router();
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://repoplus.kz';
 const BACKEND_URL  = process.env.BACKEND_URL  || 'https://repoplus-production.up.railway.app';
+
+const desktopStartLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+const desktopPollLimiter  = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
+
+function randomToken(bytes = 32) {
+  return crypto.randomBytes(bytes).toString('base64url');
+}
+function tokenHash(value) {
+  return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
+}
+function safeTokenMatch(value, expectedHash) {
+  const actual = Buffer.from(tokenHash(value), 'hex');
+  const expected = Buffer.from(String(expectedHash || ''), 'hex');
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+function desktopResultPage(ok, detail) {
+  const title = ok ? 'Meta подключена' : 'Не удалось подключить Meta';
+  const color = ok ? '#14804a' : '#b42318';
+  return `<!doctype html><meta charset="utf-8"><title>${title}</title>
+    <body style="font:16px system-ui;max-width:620px;margin:12vh auto;padding:24px;color:#17202a">
+    <h1 style="color:${color}">${title}</h1><p>${detail}</p>
+    <p>Это окно можно закрыть и вернуться в приложение.</p></body>`;
+}
 
 // JWT из ?token=... (для browser-redirect flow)
 function authQuery(req, res, next) {
@@ -66,6 +91,93 @@ async function saveClientToken(clientId, source, accessToken, refreshToken, expi
 
 // ════════════════════ FACEBOOK ════════════════════
 
+// Desktop device flow: App Secret остаётся только на backend. Десктоп получает
+// токен ровно один раз по отдельному секрету опроса; сессия живёт 10 минут.
+router.post('/facebook/desktop/start', desktopStartLimiter, async (_req, res) => {
+  try {
+    const pollToken = randomToken();
+    const authorizeToken = randomToken();
+    const oauthState = randomToken();
+    const created = await query(
+      `INSERT INTO desktop_oauth_sessions
+         (source, poll_token_hash, authorize_token_hash, oauth_state, status, expires_at)
+       VALUES ('facebook',$1,$2,$3,'pending',NOW() + INTERVAL '10 minutes')
+       RETURNING id`,
+      [tokenHash(pollToken), tokenHash(authorizeToken), oauthState]
+    );
+    const flowId = created.rows[0].id;
+    const authorizeUrl = BACKEND_URL + '/api/oauth/facebook/desktop/authorize?' +
+      new URLSearchParams({ flow_id: flowId, authorize_token: authorizeToken });
+    res.status(201).json({ flow_id: flowId, poll_token: pollToken, authorize_url: authorizeUrl, expires_in: 600 });
+  } catch (e) {
+    console.error('[OAUTH FB DESKTOP START]', e.message);
+    res.status(500).json({ error: 'Не удалось создать сессию входа' });
+  }
+});
+
+router.get('/facebook/desktop/authorize', async (req, res) => {
+  try {
+    const { flow_id: flowId, authorize_token: authorizeToken } = req.query;
+    if (!flowId || !authorizeToken) return res.status(400).send(desktopResultPage(false, 'Некорректная ссылка входа.'));
+    const found = await query(
+      `SELECT * FROM desktop_oauth_sessions
+       WHERE id=$1 AND source='facebook' AND status='pending' AND expires_at > NOW()`,
+      [flowId]
+    );
+    const session = found.rows[0];
+    if (!session || !safeTokenMatch(authorizeToken, session.authorize_token_hash)) {
+      return res.status(410).send(desktopResultPage(false, 'Ссылка устарела или уже использована.'));
+    }
+    const state = encodeState({ mode: 'desktop', oauthState: session.oauth_state });
+    const params = new URLSearchParams({
+      client_id: process.env.FB_APP_ID,
+      redirect_uri: BACKEND_URL + '/api/oauth/facebook/callback',
+      scope: 'ads_read,business_management',
+      response_type: 'code',
+      state,
+    });
+    res.redirect('https://www.facebook.com/v20.0/dialog/oauth?' + params);
+  } catch (e) {
+    console.error('[OAUTH FB DESKTOP AUTHORIZE]', e.message);
+    res.status(500).send(desktopResultPage(false, 'Сервер не смог начать вход.'));
+  }
+});
+
+router.post('/facebook/desktop/status', desktopPollLimiter, async (req, res) => {
+  try {
+    const { flow_id: flowId, poll_token: pollToken } = req.body || {};
+    if (!flowId || !pollToken) return res.status(400).json({ error: 'flow_id и poll_token обязательны' });
+    const found = await query(
+      `SELECT * FROM desktop_oauth_sessions WHERE id=$1 AND source='facebook'`, [flowId]
+    );
+    const session = found.rows[0];
+    if (!session || !safeTokenMatch(pollToken, session.poll_token_hash)) {
+      return res.status(404).json({ error: 'Сессия входа не найдена' });
+    }
+    if (session.expires_at < new Date()) return res.json({ status: 'expired' });
+    if (session.status !== 'complete') {
+      return res.json({ status: session.status, error: session.error_message || undefined });
+    }
+    if (session.consumed_at || !session.access_token) {
+      return res.status(410).json({ error: 'Результат входа уже получен' });
+    }
+
+    const accessToken = decrypt(session.access_token);
+    if (!accessToken) throw new Error('Desktop token decrypt failed');
+    const accountsResp = await axios.get('https://graph.facebook.com/v20.0/me/adaccounts', {
+      params: { access_token: accessToken, fields: 'id,account_id,name,account_status,currency', limit: 500 },
+    });
+    const accounts = accountsResp.data?.data || [];
+    await query(
+      `UPDATE desktop_oauth_sessions SET consumed_at=NOW(), access_token=NULL WHERE id=$1`, [flowId]
+    );
+    res.json({ status: 'complete', access_token: accessToken, accounts, expires_at: session.token_expires_at });
+  } catch (e) {
+    console.error('[OAUTH FB DESKTOP STATUS]', e.message);
+    res.status(500).json({ error: 'Не удалось завершить вход через Meta' });
+  }
+});
+
 router.get('/facebook/init', authQuery, (req, res) => {
   const { client_id } = req.query;
   if (!client_id) return res.status(400).send('client_id required');
@@ -95,10 +207,21 @@ router.get('/facebook/connect-init', authQuery, (req, res) => {
 
 router.get('/facebook/callback', async (req, res) => {
   const { code, state, error } = req.query;
-  if (error || !code) return res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=facebook');
 
   try {
     const st = decodeState(state);
+
+    if (error || !code) {
+      if (st.mode === 'desktop') {
+        await query(
+          `UPDATE desktop_oauth_sessions SET status='denied', error_message=$1
+           WHERE oauth_state=$2 AND status='pending'`,
+          ['Пользователь отменил вход через Meta', st.oauthState]
+        );
+        return res.status(400).send(desktopResultPage(false, 'Вы отменили предоставление доступа.'));
+      }
+      return res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=facebook');
+    }
 
     const shortRes = await axios.get('https://graph.facebook.com/v20.0/oauth/access_token', {
       params: {
@@ -121,6 +244,18 @@ router.get('/facebook/callback', async (req, res) => {
     const expiresIn   = longRes.data.expires_in || 5184000;
     const expiresAt   = new Date(Date.now() + expiresIn * 1000);
 
+    if (st.mode === 'desktop') {
+      const updated = await query(
+        `UPDATE desktop_oauth_sessions
+         SET status='complete', access_token=$1, token_expires_at=$2, authorize_token_hash=NULL
+         WHERE oauth_state=$3 AND status='pending' AND expires_at > NOW()
+         RETURNING id`,
+        [encrypt(accessToken), expiresAt, st.oauthState]
+      );
+      if (!updated.rows.length) throw new Error('Desktop OAuth session expired or not found');
+      return res.send(desktopResultPage(true, 'Доступ к рекламным кабинетам успешно предоставлен.'));
+    }
+
     if (st.mode === 'discover') {
       await saveUserToken(st.userId, 'facebook', accessToken, null, expiresAt);
       return res.redirect(FRONTEND_URL + '/dashboard.html?connected=facebook');
@@ -130,6 +265,16 @@ router.get('/facebook/callback', async (req, res) => {
     res.redirect(FRONTEND_URL + '/dashboard.html?oauth_success=facebook');
   } catch(e) {
     console.error('[OAUTH FB]', e.message);
+    try {
+      const st = state ? decodeState(state) : null;
+      if (st?.mode === 'desktop') {
+        await query(
+          `UPDATE desktop_oauth_sessions SET status='error', error_message='Ошибка обмена OAuth-кода'
+           WHERE oauth_state=$1 AND status='pending'`, [st.oauthState]
+        );
+        return res.status(500).send(desktopResultPage(false, 'Ошибка обмена данными с Meta. Попробуйте ещё раз.'));
+      }
+    } catch (_) {}
     res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=facebook');
   }
 });
