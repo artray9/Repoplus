@@ -234,6 +234,7 @@ async function autoMigrate() {
       oauth_state          TEXT UNIQUE NOT NULL,
       status               TEXT NOT NULL DEFAULT 'pending',
       access_token         TEXT,
+      refresh_token        TEXT,
       token_expires_at     TIMESTAMP,
       error_message        TEXT,
       expires_at           TIMESTAMP NOT NULL,
@@ -241,6 +242,7 @@ async function autoMigrate() {
       created_at           TIMESTAMP DEFAULT NOW()
     )`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_desktop_oauth_expiry ON desktop_oauth_sessions(expires_at)`);
+    await client.query(`ALTER TABLE desktop_oauth_sessions ADD COLUMN IF NOT EXISTS refresh_token TEXT`);
     await client.query(`ALTER TABLE account_balances ADD COLUMN IF NOT EXISTS extra JSONB DEFAULT '{}'`);
     await client.query(`ALTER TABLE account_balances ADD COLUMN IF NOT EXISTS amount_spent NUMERIC DEFAULT 0`);
     await client.query(`ALTER TABLE account_balances ADD COLUMN IF NOT EXISTS next_bill_date TIMESTAMP`);
