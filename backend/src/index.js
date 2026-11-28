@@ -19,6 +19,10 @@ const app  = express();
 const PORT = process.env.PORT || 3001;
 const HOST = '0.0.0.0';
 
+// Render terminates HTTPS at its proxy and forwards the original client IP.
+// Trust only that first proxy hop so express-rate-limit can identify callers.
+app.set('trust proxy', 1);
+
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', ts: new Date() }));
 
 // Whitelist: production-домены + всё что в FRONTEND_URL и EXTRA_ORIGINS.
