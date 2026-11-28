@@ -281,7 +281,10 @@ router.get('/facebook/callback', async (req, res) => {
 
 // ════════════════════ GOOGLE ════════════════════
 
-const GOOGLE_API_VERSIONS = ['v22', 'v21', 'v20', 'v19', 'v18', 'v17'];
+// Google Ads retires API versions regularly. Try the currently supported
+// major versions newest-first so an OAuth connection keeps working during
+// the migration window between releases.
+const GOOGLE_API_VERSIONS = ['v26', 'v25', 'v24', 'v23'];
 
 async function googleDesktopAccounts(accessToken) {
   const devToken = process.env.GOOGLE_DEVELOPER_TOKEN || process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '';
