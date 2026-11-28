@@ -519,6 +519,125 @@ router.get('/google/callback', async (req, res) => {
 
 // ════════════════════ TIKTOK ════════════════════
 
+async function tiktokDesktopAccounts(accessToken, fallbackIds = []) {
+  let list = [];
+  try {
+    const r = await axios.get('https://business-api.tiktok.com/open_api/v1.3/oauth2/advertiser/get/', {
+      params: {
+        access_token: accessToken,
+        secret: process.env.TT_APP_SECRET,
+        app_id: process.env.TT_APP_ID,
+      },
+    });
+    if (r.data?.code === 0) list = r.data?.data?.list || [];
+  } catch (e) {
+    console.warn('[OAUTH TT DESKTOP ACCOUNTS]', e.response?.data || e.message);
+  }
+  const byId = new Map();
+  for (const account of list) {
+    const id = String(account.advertiser_id || '');
+    if (id) byId.set(id, {
+      id,
+      name: account.advertiser_name || ('TikTok Advertiser ' + id),
+      currency: account.currency || '',
+    });
+  }
+  for (const value of fallbackIds || []) {
+    const id = String(value || '');
+    if (id && !byId.has(id)) byId.set(id, {
+      id, name: 'TikTok Advertiser ' + id, currency: '',
+    });
+  }
+  return Array.from(byId.values());
+}
+
+router.post('/tiktok/desktop/start', desktopStartLimiter, async (_req, res) => {
+  try {
+    if (!process.env.TT_APP_ID || !process.env.TT_APP_SECRET) {
+      return res.status(503).json({ error: 'TikTok OAuth не настроен на сервере' });
+    }
+    const pollToken = randomToken();
+    const authorizeToken = randomToken();
+    const oauthState = randomToken();
+    const created = await query(
+      `INSERT INTO desktop_oauth_sessions
+         (source, poll_token_hash, authorize_token_hash, oauth_state, status, expires_at)
+       VALUES ('tiktok',$1,$2,$3,'pending',NOW() + INTERVAL '10 minutes')
+       RETURNING id`,
+      [tokenHash(pollToken), tokenHash(authorizeToken), oauthState]
+    );
+    const flowId = created.rows[0].id;
+    const authorizeUrl = BACKEND_URL + '/api/oauth/tiktok/desktop/authorize?' +
+      new URLSearchParams({ flow_id: flowId, authorize_token: authorizeToken });
+    res.status(201).json({
+      flow_id: flowId, poll_token: pollToken, authorize_url: authorizeUrl, expires_in: 600,
+    });
+  } catch (e) {
+    console.error('[OAUTH TT DESKTOP START]', e.message);
+    res.status(500).json({ error: 'Не удалось создать сессию TikTok-входа' });
+  }
+});
+
+router.get('/tiktok/desktop/authorize', async (req, res) => {
+  try {
+    const { flow_id: flowId, authorize_token: authorizeToken } = req.query;
+    if (!flowId || !authorizeToken) {
+      return res.status(400).send(desktopResultPage(false, 'Некорректная ссылка входа.', 'TikTok'));
+    }
+    const found = await query(
+      `SELECT * FROM desktop_oauth_sessions
+       WHERE id=$1 AND source='tiktok' AND status='pending' AND expires_at > NOW()`,
+      [flowId]
+    );
+    const session = found.rows[0];
+    if (!session || !safeTokenMatch(authorizeToken, session.authorize_token_hash)) {
+      return res.status(410).send(desktopResultPage(false, 'Ссылка устарела или уже использована.', 'TikTok'));
+    }
+    const params = new URLSearchParams({
+      app_id: process.env.TT_APP_ID,
+      redirect_uri: BACKEND_URL + '/api/oauth/tiktok/callback',
+      state: encodeState({ mode: 'desktop', oauthState: session.oauth_state }),
+    });
+    res.redirect('https://business-api.tiktok.com/portal/auth?' + params);
+  } catch (e) {
+    console.error('[OAUTH TT DESKTOP AUTHORIZE]', e.message);
+    res.status(500).send(desktopResultPage(false, 'Сервер не смог начать вход.', 'TikTok'));
+  }
+});
+
+router.post('/tiktok/desktop/status', desktopPollLimiter, async (req, res) => {
+  try {
+    const { flow_id: flowId, poll_token: pollToken } = req.body || {};
+    if (!flowId || !pollToken) return res.status(400).json({ error: 'flow_id и poll_token обязательны' });
+    const found = await query(
+      `SELECT * FROM desktop_oauth_sessions WHERE id=$1 AND source='tiktok'`, [flowId]
+    );
+    const session = found.rows[0];
+    if (!session || !safeTokenMatch(pollToken, session.poll_token_hash)) {
+      return res.status(404).json({ error: 'Сессия входа не найдена' });
+    }
+    if (session.expires_at < new Date()) return res.json({ status: 'expired' });
+    if (session.status !== 'complete') {
+      return res.json({ status: session.status, error: session.error_message || undefined });
+    }
+    if (session.consumed_at || !session.access_token) {
+      return res.status(410).json({ error: 'Результат входа уже получен' });
+    }
+    const accessToken = decrypt(session.access_token);
+    let extra = {};
+    try { extra = JSON.parse(session.error_message || '{}'); } catch (_) {}
+    const accounts = await tiktokDesktopAccounts(accessToken, extra.advertiser_ids || []);
+    await query(
+      `UPDATE desktop_oauth_sessions
+       SET consumed_at=NOW(), access_token=NULL, refresh_token=NULL, error_message=NULL WHERE id=$1`, [flowId]
+    );
+    res.json({ status: 'complete', access_token: accessToken, accounts });
+  } catch (e) {
+    console.error('[OAUTH TT DESKTOP STATUS]', e.response?.data || e.message);
+    res.status(500).json({ error: 'Не удалось завершить вход через TikTok Ads' });
+  }
+});
+
 router.get('/tiktok/init', authQuery, (req, res) => {
   const { client_id } = req.query;
   if (!client_id) return res.status(400).send('client_id required');
@@ -542,15 +661,27 @@ router.get('/tiktok/connect-init', authQuery, (req, res) => {
 });
 
 router.get('/tiktok/callback', async (req, res) => {
-  const { auth_code, state, error } = req.query;
-  if (error || !auth_code) return res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=tiktok');
-
+  const { auth_code, code, state, error } = req.query;
   try {
     const st = decodeState(state);
-    const tokenRes = await axios.post('https://business-api.tiktok.com/open_api/v1.3/oauth2/access_token/', {
+    const authorizationCode = auth_code || code;
+    if (error || !authorizationCode) {
+      if (st.mode === 'desktop') {
+        await query(
+          `UPDATE desktop_oauth_sessions SET status='denied', error_message=$1
+           WHERE oauth_state=$2 AND status='pending'`,
+          ['Пользователь отменил вход через TikTok', st.oauthState]
+        );
+        return res.status(400).send(desktopResultPage(false, 'Вы отменили предоставление доступа.', 'TikTok'));
+      }
+      return res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=tiktok');
+    }
+    const tokenRes = await axios.post('https://business-api.tiktok.com/open_api/v2.0/oauth2/access_token/', {
       app_id:    process.env.TT_APP_ID,
       secret:    process.env.TT_APP_SECRET,
-      auth_code,
+      auth_code: authorizationCode,
+      is_long_term: true,
+      return_advertiser_ids: true,
     });
     if (tokenRes.data?.code !== 0) throw new Error(tokenRes.data?.message || 'TikTok OAuth failed');
 
@@ -559,6 +690,22 @@ router.get('/tiktok/callback', async (req, res) => {
     const refresh_token = data.refresh_token || null;
     const expiresAt     = new Date(Date.now() + (data.expires_in || 86400) * 1000);
     const advertiserIds = data.advertiser_ids || [];
+
+    if (st.mode === 'desktop') {
+      const updated = await query(
+        `UPDATE desktop_oauth_sessions
+         SET status='complete', access_token=$1, refresh_token=$2,
+             token_expires_at=$3, authorize_token_hash=NULL, error_message=$4
+         WHERE oauth_state=$5 AND status='pending' AND expires_at > NOW()
+         RETURNING id`,
+        [
+          encrypt(access_token), encrypt(refresh_token) || null, expiresAt,
+          JSON.stringify({ advertiser_ids: advertiserIds }), st.oauthState,
+        ]
+      );
+      if (!updated.rows.length) throw new Error('Desktop OAuth session expired or not found');
+      return res.send(desktopResultPage(true, 'Доступ к TikTok Ads успешно предоставлен.', 'TikTok'));
+    }
 
     if (st.mode === 'discover') {
       await saveUserToken(st.userId, 'tiktok', access_token, refresh_token, expiresAt, { advertiser_ids: advertiserIds });
@@ -575,6 +722,16 @@ router.get('/tiktok/callback', async (req, res) => {
     res.redirect(FRONTEND_URL + '/dashboard.html?oauth_success=tiktok');
   } catch(e) {
     console.error('[OAUTH TT]', e.message);
+    try {
+      const st = state ? decodeState(state) : null;
+      if (st?.mode === 'desktop') {
+        await query(
+          `UPDATE desktop_oauth_sessions SET status='error', error_message='Ошибка обмена OAuth-кода'
+           WHERE oauth_state=$1 AND status='pending'`, [st.oauthState]
+        );
+        return res.status(500).send(desktopResultPage(false, 'Ошибка обмена данными с TikTok.', 'TikTok'));
+      }
+    } catch (_) {}
     res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=tiktok');
   }
 });
