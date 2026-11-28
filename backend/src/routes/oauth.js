@@ -11,13 +11,38 @@
 const express = require('express');
 const axios   = require('axios');
 const jwt     = require('jsonwebtoken');
+const crypto  = require('crypto');
+const rateLimit = require('express-rate-limit');
 const { query } = require('../db');
-const { encrypt } = require('../lib/crypto');
+const { encrypt, decrypt } = require('../lib/crypto');
 
 const router = express.Router();
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://repoplus.kz';
 const BACKEND_URL  = process.env.BACKEND_URL  || 'https://repoplus-production.up.railway.app';
+
+const desktopStartLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+const desktopPollLimiter  = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
+
+function randomToken(bytes = 32) {
+  return crypto.randomBytes(bytes).toString('base64url');
+}
+function tokenHash(value) {
+  return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
+}
+function safeTokenMatch(value, expectedHash) {
+  const actual = Buffer.from(tokenHash(value), 'hex');
+  const expected = Buffer.from(String(expectedHash || ''), 'hex');
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+function desktopResultPage(ok, detail, provider = 'Meta') {
+  const title = ok ? provider + ' подключён' : 'Не удалось подключить ' + provider;
+  const color = ok ? '#14804a' : '#b42318';
+  return `<!doctype html><meta charset="utf-8"><title>${title}</title>
+    <body style="font:16px system-ui;max-width:620px;margin:12vh auto;padding:24px;color:#17202a">
+    <h1 style="color:${color}">${title}</h1><p>${detail}</p>
+    <p>Это окно можно закрыть и вернуться в приложение.</p></body>`;
+}
 
 // JWT из ?token=... (для browser-redirect flow)
 function authQuery(req, res, next) {
@@ -66,6 +91,93 @@ async function saveClientToken(clientId, source, accessToken, refreshToken, expi
 
 // ════════════════════ FACEBOOK ════════════════════
 
+// Desktop device flow: App Secret остаётся только на backend. Десктоп получает
+// токен ровно один раз по отдельному секрету опроса; сессия живёт 10 минут.
+router.post('/facebook/desktop/start', desktopStartLimiter, async (_req, res) => {
+  try {
+    const pollToken = randomToken();
+    const authorizeToken = randomToken();
+    const oauthState = randomToken();
+    const created = await query(
+      `INSERT INTO desktop_oauth_sessions
+         (source, poll_token_hash, authorize_token_hash, oauth_state, status, expires_at)
+       VALUES ('facebook',$1,$2,$3,'pending',NOW() + INTERVAL '10 minutes')
+       RETURNING id`,
+      [tokenHash(pollToken), tokenHash(authorizeToken), oauthState]
+    );
+    const flowId = created.rows[0].id;
+    const authorizeUrl = BACKEND_URL + '/api/oauth/facebook/desktop/authorize?' +
+      new URLSearchParams({ flow_id: flowId, authorize_token: authorizeToken });
+    res.status(201).json({ flow_id: flowId, poll_token: pollToken, authorize_url: authorizeUrl, expires_in: 600 });
+  } catch (e) {
+    console.error('[OAUTH FB DESKTOP START]', e.message);
+    res.status(500).json({ error: 'Не удалось создать сессию входа' });
+  }
+});
+
+router.get('/facebook/desktop/authorize', async (req, res) => {
+  try {
+    const { flow_id: flowId, authorize_token: authorizeToken } = req.query;
+    if (!flowId || !authorizeToken) return res.status(400).send(desktopResultPage(false, 'Некорректная ссылка входа.'));
+    const found = await query(
+      `SELECT * FROM desktop_oauth_sessions
+       WHERE id=$1 AND source='facebook' AND status='pending' AND expires_at > NOW()`,
+      [flowId]
+    );
+    const session = found.rows[0];
+    if (!session || !safeTokenMatch(authorizeToken, session.authorize_token_hash)) {
+      return res.status(410).send(desktopResultPage(false, 'Ссылка устарела или уже использована.'));
+    }
+    const state = encodeState({ mode: 'desktop', oauthState: session.oauth_state });
+    const params = new URLSearchParams({
+      client_id: process.env.FB_APP_ID,
+      redirect_uri: BACKEND_URL + '/api/oauth/facebook/callback',
+      scope: 'ads_read,business_management',
+      response_type: 'code',
+      state,
+    });
+    res.redirect('https://www.facebook.com/v20.0/dialog/oauth?' + params);
+  } catch (e) {
+    console.error('[OAUTH FB DESKTOP AUTHORIZE]', e.message);
+    res.status(500).send(desktopResultPage(false, 'Сервер не смог начать вход.'));
+  }
+});
+
+router.post('/facebook/desktop/status', desktopPollLimiter, async (req, res) => {
+  try {
+    const { flow_id: flowId, poll_token: pollToken } = req.body || {};
+    if (!flowId || !pollToken) return res.status(400).json({ error: 'flow_id и poll_token обязательны' });
+    const found = await query(
+      `SELECT * FROM desktop_oauth_sessions WHERE id=$1 AND source='facebook'`, [flowId]
+    );
+    const session = found.rows[0];
+    if (!session || !safeTokenMatch(pollToken, session.poll_token_hash)) {
+      return res.status(404).json({ error: 'Сессия входа не найдена' });
+    }
+    if (session.expires_at < new Date()) return res.json({ status: 'expired' });
+    if (session.status !== 'complete') {
+      return res.json({ status: session.status, error: session.error_message || undefined });
+    }
+    if (session.consumed_at || !session.access_token) {
+      return res.status(410).json({ error: 'Результат входа уже получен' });
+    }
+
+    const accessToken = decrypt(session.access_token);
+    if (!accessToken) throw new Error('Desktop token decrypt failed');
+    const accountsResp = await axios.get('https://graph.facebook.com/v20.0/me/adaccounts', {
+      params: { access_token: accessToken, fields: 'id,account_id,name,account_status,currency', limit: 500 },
+    });
+    const accounts = accountsResp.data?.data || [];
+    await query(
+      `UPDATE desktop_oauth_sessions SET consumed_at=NOW(), access_token=NULL WHERE id=$1`, [flowId]
+    );
+    res.json({ status: 'complete', access_token: accessToken, accounts, expires_at: session.token_expires_at });
+  } catch (e) {
+    console.error('[OAUTH FB DESKTOP STATUS]', e.message);
+    res.status(500).json({ error: 'Не удалось завершить вход через Meta' });
+  }
+});
+
 router.get('/facebook/init', authQuery, (req, res) => {
   const { client_id } = req.query;
   if (!client_id) return res.status(400).send('client_id required');
@@ -95,10 +207,21 @@ router.get('/facebook/connect-init', authQuery, (req, res) => {
 
 router.get('/facebook/callback', async (req, res) => {
   const { code, state, error } = req.query;
-  if (error || !code) return res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=facebook');
 
   try {
     const st = decodeState(state);
+
+    if (error || !code) {
+      if (st.mode === 'desktop') {
+        await query(
+          `UPDATE desktop_oauth_sessions SET status='denied', error_message=$1
+           WHERE oauth_state=$2 AND status='pending'`,
+          ['Пользователь отменил вход через Meta', st.oauthState]
+        );
+        return res.status(400).send(desktopResultPage(false, 'Вы отменили предоставление доступа.'));
+      }
+      return res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=facebook');
+    }
 
     const shortRes = await axios.get('https://graph.facebook.com/v20.0/oauth/access_token', {
       params: {
@@ -121,6 +244,18 @@ router.get('/facebook/callback', async (req, res) => {
     const expiresIn   = longRes.data.expires_in || 5184000;
     const expiresAt   = new Date(Date.now() + expiresIn * 1000);
 
+    if (st.mode === 'desktop') {
+      const updated = await query(
+        `UPDATE desktop_oauth_sessions
+         SET status='complete', access_token=$1, token_expires_at=$2, authorize_token_hash=NULL
+         WHERE oauth_state=$3 AND status='pending' AND expires_at > NOW()
+         RETURNING id`,
+        [encrypt(accessToken), expiresAt, st.oauthState]
+      );
+      if (!updated.rows.length) throw new Error('Desktop OAuth session expired or not found');
+      return res.send(desktopResultPage(true, 'Доступ к рекламным кабинетам успешно предоставлен.'));
+    }
+
     if (st.mode === 'discover') {
       await saveUserToken(st.userId, 'facebook', accessToken, null, expiresAt);
       return res.redirect(FRONTEND_URL + '/dashboard.html?connected=facebook');
@@ -130,11 +265,165 @@ router.get('/facebook/callback', async (req, res) => {
     res.redirect(FRONTEND_URL + '/dashboard.html?oauth_success=facebook');
   } catch(e) {
     console.error('[OAUTH FB]', e.message);
+    try {
+      const st = state ? decodeState(state) : null;
+      if (st?.mode === 'desktop') {
+        await query(
+          `UPDATE desktop_oauth_sessions SET status='error', error_message='Ошибка обмена OAuth-кода'
+           WHERE oauth_state=$1 AND status='pending'`, [st.oauthState]
+        );
+        return res.status(500).send(desktopResultPage(false, 'Ошибка обмена данными с Meta. Попробуйте ещё раз.'));
+      }
+    } catch (_) {}
     res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=facebook');
   }
 });
 
 // ════════════════════ GOOGLE ════════════════════
+
+// Google Ads retires API versions regularly. Try the currently supported
+// major versions newest-first so an OAuth connection keeps working during
+// the migration window between releases.
+const GOOGLE_API_VERSIONS = ['v26', 'v25', 'v24', 'v23'];
+
+async function googleDesktopAccounts(accessToken) {
+  const devToken = process.env.GOOGLE_DEVELOPER_TOKEN || process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '';
+  if (!devToken) throw new Error('GOOGLE_DEVELOPER_TOKEN is not configured');
+  let resourceNames = null;
+  let version = null;
+  let lastError = null;
+  for (const candidate of GOOGLE_API_VERSIONS) {
+    try {
+      const r = await axios.get(
+        'https://googleads.googleapis.com/' + candidate + '/customers:listAccessibleCustomers',
+        { headers: { Authorization: 'Bearer ' + accessToken, 'developer-token': devToken } }
+      );
+      resourceNames = r.data?.resourceNames || [];
+      version = candidate;
+      break;
+    } catch (e) {
+      lastError = e;
+      if (![400, 403, 404].includes(e.response?.status)) throw e;
+    }
+  }
+  if (!resourceNames) throw lastError || new Error('Google Ads API unavailable');
+
+  const accounts = [];
+  for (const resourceName of resourceNames) {
+    const customerId = String(resourceName).replace('customers/', '');
+    let name = 'Google Ads ' + customerId;
+    let currency = '';
+    let manager = false;
+    try {
+      const r = await axios.post(
+        'https://googleads.googleapis.com/' + version + '/customers/' + customerId + '/googleAds:search',
+        { query: 'SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.manager FROM customer LIMIT 1' },
+        { headers: {
+          Authorization: 'Bearer ' + accessToken,
+          'developer-token': devToken,
+          'login-customer-id': customerId,
+          'Content-Type': 'application/json',
+        }}
+      );
+      const customer = r.data?.results?.[0]?.customer;
+      if (customer) {
+        name = customer.descriptiveName || name;
+        currency = customer.currencyCode || '';
+        manager = !!customer.manager;
+      }
+    } catch (_) {}
+    accounts.push({ id: customerId, name, currency, is_manager: manager });
+  }
+  return accounts;
+}
+
+router.post('/google/desktop/start', desktopStartLimiter, async (_req, res) => {
+  try {
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      return res.status(503).json({ error: 'Google OAuth не настроен на сервере' });
+    }
+    const pollToken = randomToken();
+    const authorizeToken = randomToken();
+    const oauthState = randomToken();
+    const created = await query(
+      `INSERT INTO desktop_oauth_sessions
+         (source, poll_token_hash, authorize_token_hash, oauth_state, status, expires_at)
+       VALUES ('google',$1,$2,$3,'pending',NOW() + INTERVAL '10 minutes')
+       RETURNING id`,
+      [tokenHash(pollToken), tokenHash(authorizeToken), oauthState]
+    );
+    const flowId = created.rows[0].id;
+    const authorizeUrl = BACKEND_URL + '/api/oauth/google/desktop/authorize?' +
+      new URLSearchParams({ flow_id: flowId, authorize_token: authorizeToken });
+    res.status(201).json({ flow_id: flowId, poll_token: pollToken, authorize_url: authorizeUrl, expires_in: 600 });
+  } catch (e) {
+    console.error('[OAUTH GOOGLE DESKTOP START]', e.message);
+    res.status(500).json({ error: 'Не удалось создать сессию Google-входа' });
+  }
+});
+
+router.get('/google/desktop/authorize', async (req, res) => {
+  try {
+    const { flow_id: flowId, authorize_token: authorizeToken } = req.query;
+    if (!flowId || !authorizeToken) {
+      return res.status(400).send(desktopResultPage(false, 'Некорректная ссылка входа.', 'Google'));
+    }
+    const found = await query(
+      `SELECT * FROM desktop_oauth_sessions
+       WHERE id=$1 AND source='google' AND status='pending' AND expires_at > NOW()`,
+      [flowId]
+    );
+    const session = found.rows[0];
+    if (!session || !safeTokenMatch(authorizeToken, session.authorize_token_hash)) {
+      return res.status(410).send(desktopResultPage(false, 'Ссылка устарела или уже использована.', 'Google'));
+    }
+    const params = new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      redirect_uri: BACKEND_URL + '/api/oauth/google/callback',
+      scope: 'https://www.googleapis.com/auth/adwords',
+      response_type: 'code',
+      access_type: 'offline',
+      prompt: 'consent',
+      state: encodeState({ mode: 'desktop', oauthState: session.oauth_state }),
+    });
+    res.redirect('https://accounts.google.com/o/oauth2/v2/auth?' + params);
+  } catch (e) {
+    console.error('[OAUTH GOOGLE DESKTOP AUTHORIZE]', e.message);
+    res.status(500).send(desktopResultPage(false, 'Сервер не смог начать вход.', 'Google'));
+  }
+});
+
+router.post('/google/desktop/status', desktopPollLimiter, async (req, res) => {
+  try {
+    const { flow_id: flowId, poll_token: pollToken } = req.body || {};
+    if (!flowId || !pollToken) return res.status(400).json({ error: 'flow_id и poll_token обязательны' });
+    const found = await query(
+      `SELECT * FROM desktop_oauth_sessions WHERE id=$1 AND source='google'`, [flowId]
+    );
+    const session = found.rows[0];
+    if (!session || !safeTokenMatch(pollToken, session.poll_token_hash)) {
+      return res.status(404).json({ error: 'Сессия входа не найдена' });
+    }
+    if (session.expires_at < new Date()) return res.json({ status: 'expired' });
+    if (session.status !== 'complete') {
+      return res.json({ status: session.status, error: session.error_message || undefined });
+    }
+    if (session.consumed_at || !session.access_token || !session.refresh_token) {
+      return res.status(410).json({ error: 'Результат входа уже получен' });
+    }
+    const accessToken = decrypt(session.access_token);
+    const refreshToken = decrypt(session.refresh_token);
+    const accounts = await googleDesktopAccounts(accessToken);
+    await query(
+      `UPDATE desktop_oauth_sessions
+       SET consumed_at=NOW(), access_token=NULL, refresh_token=NULL WHERE id=$1`, [flowId]
+    );
+    res.json({ status: 'complete', refresh_token: refreshToken, accounts });
+  } catch (e) {
+    console.error('[OAUTH GOOGLE DESKTOP STATUS]', e.response?.data || e.message);
+    res.status(500).json({ error: 'Не удалось завершить вход через Google Ads' });
+  }
+});
 
 router.get('/google/init', authQuery, (req, res) => {
   const { client_id } = req.query;
@@ -168,10 +457,19 @@ router.get('/google/connect-init', authQuery, (req, res) => {
 
 router.get('/google/callback', async (req, res) => {
   const { code, state, error } = req.query;
-  if (error || !code) return res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=google');
-
   try {
     const st = decodeState(state);
+    if (error || !code) {
+      if (st.mode === 'desktop') {
+        await query(
+          `UPDATE desktop_oauth_sessions SET status='denied', error_message=$1
+           WHERE oauth_state=$2 AND status='pending'`,
+          ['Пользователь отменил вход через Google', st.oauthState]
+        );
+        return res.status(400).send(desktopResultPage(false, 'Вы отменили предоставление доступа.', 'Google'));
+      }
+      return res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=google');
+    }
     const tokenRes = await axios.post('https://oauth2.googleapis.com/token', {
       code,
       client_id:     process.env.GOOGLE_CLIENT_ID,
@@ -182,6 +480,20 @@ router.get('/google/callback', async (req, res) => {
     const { access_token, refresh_token, expires_in } = tokenRes.data;
     const expiresAt = new Date(Date.now() + (expires_in || 3600) * 1000);
 
+    if (st.mode === 'desktop') {
+      if (!refresh_token) throw new Error('Google did not return refresh_token');
+      const updated = await query(
+        `UPDATE desktop_oauth_sessions
+         SET status='complete', access_token=$1, refresh_token=$2,
+             token_expires_at=$3, authorize_token_hash=NULL
+         WHERE oauth_state=$4 AND status='pending' AND expires_at > NOW()
+         RETURNING id`,
+        [encrypt(access_token), encrypt(refresh_token), expiresAt, st.oauthState]
+      );
+      if (!updated.rows.length) throw new Error('Desktop OAuth session expired or not found');
+      return res.send(desktopResultPage(true, 'Доступ к Google Ads успешно предоставлен.', 'Google'));
+    }
+
     if (st.mode === 'discover') {
       await saveUserToken(st.userId, 'google', access_token, refresh_token, expiresAt);
       return res.redirect(FRONTEND_URL + '/dashboard.html?connected=google');
@@ -191,11 +503,140 @@ router.get('/google/callback', async (req, res) => {
     res.redirect(FRONTEND_URL + '/dashboard.html?oauth_success=google');
   } catch(e) {
     console.error('[OAUTH GOOGLE]', e.message);
+    try {
+      const st = state ? decodeState(state) : null;
+      if (st?.mode === 'desktop') {
+        await query(
+          `UPDATE desktop_oauth_sessions SET status='error', error_message='Ошибка обмена OAuth-кода'
+           WHERE oauth_state=$1 AND status='pending'`, [st.oauthState]
+        );
+        return res.status(500).send(desktopResultPage(false, 'Ошибка обмена данными с Google.', 'Google'));
+      }
+    } catch (_) {}
     res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=google');
   }
 });
 
 // ════════════════════ TIKTOK ════════════════════
+
+async function tiktokDesktopAccounts(accessToken, fallbackIds = []) {
+  let list = [];
+  try {
+    const r = await axios.get('https://business-api.tiktok.com/open_api/v1.3/oauth2/advertiser/get/', {
+      params: {
+        access_token: accessToken,
+        secret: process.env.TT_APP_SECRET,
+        app_id: process.env.TT_APP_ID,
+      },
+    });
+    if (r.data?.code === 0) list = r.data?.data?.list || [];
+  } catch (e) {
+    console.warn('[OAUTH TT DESKTOP ACCOUNTS]', e.response?.data || e.message);
+  }
+  const byId = new Map();
+  for (const account of list) {
+    const id = String(account.advertiser_id || '');
+    if (id) byId.set(id, {
+      id,
+      name: account.advertiser_name || ('TikTok Advertiser ' + id),
+      currency: account.currency || '',
+    });
+  }
+  for (const value of fallbackIds || []) {
+    const id = String(value || '');
+    if (id && !byId.has(id)) byId.set(id, {
+      id, name: 'TikTok Advertiser ' + id, currency: '',
+    });
+  }
+  return Array.from(byId.values());
+}
+
+router.post('/tiktok/desktop/start', desktopStartLimiter, async (_req, res) => {
+  try {
+    if (!process.env.TT_APP_ID || !process.env.TT_APP_SECRET) {
+      return res.status(503).json({ error: 'TikTok OAuth не настроен на сервере' });
+    }
+    const pollToken = randomToken();
+    const authorizeToken = randomToken();
+    const oauthState = randomToken();
+    const created = await query(
+      `INSERT INTO desktop_oauth_sessions
+         (source, poll_token_hash, authorize_token_hash, oauth_state, status, expires_at)
+       VALUES ('tiktok',$1,$2,$3,'pending',NOW() + INTERVAL '10 minutes')
+       RETURNING id`,
+      [tokenHash(pollToken), tokenHash(authorizeToken), oauthState]
+    );
+    const flowId = created.rows[0].id;
+    const authorizeUrl = BACKEND_URL + '/api/oauth/tiktok/desktop/authorize?' +
+      new URLSearchParams({ flow_id: flowId, authorize_token: authorizeToken });
+    res.status(201).json({
+      flow_id: flowId, poll_token: pollToken, authorize_url: authorizeUrl, expires_in: 600,
+    });
+  } catch (e) {
+    console.error('[OAUTH TT DESKTOP START]', e.message);
+    res.status(500).json({ error: 'Не удалось создать сессию TikTok-входа' });
+  }
+});
+
+router.get('/tiktok/desktop/authorize', async (req, res) => {
+  try {
+    const { flow_id: flowId, authorize_token: authorizeToken } = req.query;
+    if (!flowId || !authorizeToken) {
+      return res.status(400).send(desktopResultPage(false, 'Некорректная ссылка входа.', 'TikTok'));
+    }
+    const found = await query(
+      `SELECT * FROM desktop_oauth_sessions
+       WHERE id=$1 AND source='tiktok' AND status='pending' AND expires_at > NOW()`,
+      [flowId]
+    );
+    const session = found.rows[0];
+    if (!session || !safeTokenMatch(authorizeToken, session.authorize_token_hash)) {
+      return res.status(410).send(desktopResultPage(false, 'Ссылка устарела или уже использована.', 'TikTok'));
+    }
+    const params = new URLSearchParams({
+      app_id: process.env.TT_APP_ID,
+      redirect_uri: BACKEND_URL + '/api/oauth/tiktok/callback',
+      state: encodeState({ mode: 'desktop', oauthState: session.oauth_state }),
+    });
+    res.redirect('https://business-api.tiktok.com/portal/auth?' + params);
+  } catch (e) {
+    console.error('[OAUTH TT DESKTOP AUTHORIZE]', e.message);
+    res.status(500).send(desktopResultPage(false, 'Сервер не смог начать вход.', 'TikTok'));
+  }
+});
+
+router.post('/tiktok/desktop/status', desktopPollLimiter, async (req, res) => {
+  try {
+    const { flow_id: flowId, poll_token: pollToken } = req.body || {};
+    if (!flowId || !pollToken) return res.status(400).json({ error: 'flow_id и poll_token обязательны' });
+    const found = await query(
+      `SELECT * FROM desktop_oauth_sessions WHERE id=$1 AND source='tiktok'`, [flowId]
+    );
+    const session = found.rows[0];
+    if (!session || !safeTokenMatch(pollToken, session.poll_token_hash)) {
+      return res.status(404).json({ error: 'Сессия входа не найдена' });
+    }
+    if (session.expires_at < new Date()) return res.json({ status: 'expired' });
+    if (session.status !== 'complete') {
+      return res.json({ status: session.status, error: session.error_message || undefined });
+    }
+    if (session.consumed_at || !session.access_token) {
+      return res.status(410).json({ error: 'Результат входа уже получен' });
+    }
+    const accessToken = decrypt(session.access_token);
+    let extra = {};
+    try { extra = JSON.parse(session.error_message || '{}'); } catch (_) {}
+    const accounts = await tiktokDesktopAccounts(accessToken, extra.advertiser_ids || []);
+    await query(
+      `UPDATE desktop_oauth_sessions
+       SET consumed_at=NOW(), access_token=NULL, refresh_token=NULL, error_message=NULL WHERE id=$1`, [flowId]
+    );
+    res.json({ status: 'complete', access_token: accessToken, accounts });
+  } catch (e) {
+    console.error('[OAUTH TT DESKTOP STATUS]', e.response?.data || e.message);
+    res.status(500).json({ error: 'Не удалось завершить вход через TikTok Ads' });
+  }
+});
 
 router.get('/tiktok/init', authQuery, (req, res) => {
   const { client_id } = req.query;
@@ -220,15 +661,27 @@ router.get('/tiktok/connect-init', authQuery, (req, res) => {
 });
 
 router.get('/tiktok/callback', async (req, res) => {
-  const { auth_code, state, error } = req.query;
-  if (error || !auth_code) return res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=tiktok');
-
+  const { auth_code, code, state, error } = req.query;
   try {
     const st = decodeState(state);
-    const tokenRes = await axios.post('https://business-api.tiktok.com/open_api/v1.3/oauth2/access_token/', {
+    const authorizationCode = auth_code || code;
+    if (error || !authorizationCode) {
+      if (st.mode === 'desktop') {
+        await query(
+          `UPDATE desktop_oauth_sessions SET status='denied', error_message=$1
+           WHERE oauth_state=$2 AND status='pending'`,
+          ['Пользователь отменил вход через TikTok', st.oauthState]
+        );
+        return res.status(400).send(desktopResultPage(false, 'Вы отменили предоставление доступа.', 'TikTok'));
+      }
+      return res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=tiktok');
+    }
+    const tokenRes = await axios.post('https://business-api.tiktok.com/open_api/v2.0/oauth2/access_token/', {
       app_id:    process.env.TT_APP_ID,
       secret:    process.env.TT_APP_SECRET,
-      auth_code,
+      auth_code: authorizationCode,
+      is_long_term: true,
+      return_advertiser_ids: true,
     });
     if (tokenRes.data?.code !== 0) throw new Error(tokenRes.data?.message || 'TikTok OAuth failed');
 
@@ -237,6 +690,22 @@ router.get('/tiktok/callback', async (req, res) => {
     const refresh_token = data.refresh_token || null;
     const expiresAt     = new Date(Date.now() + (data.expires_in || 86400) * 1000);
     const advertiserIds = data.advertiser_ids || [];
+
+    if (st.mode === 'desktop') {
+      const updated = await query(
+        `UPDATE desktop_oauth_sessions
+         SET status='complete', access_token=$1, refresh_token=$2,
+             token_expires_at=$3, authorize_token_hash=NULL, error_message=$4
+         WHERE oauth_state=$5 AND status='pending' AND expires_at > NOW()
+         RETURNING id`,
+        [
+          encrypt(access_token), encrypt(refresh_token) || null, expiresAt,
+          JSON.stringify({ advertiser_ids: advertiserIds }), st.oauthState,
+        ]
+      );
+      if (!updated.rows.length) throw new Error('Desktop OAuth session expired or not found');
+      return res.send(desktopResultPage(true, 'Доступ к TikTok Ads успешно предоставлен.', 'TikTok'));
+    }
 
     if (st.mode === 'discover') {
       await saveUserToken(st.userId, 'tiktok', access_token, refresh_token, expiresAt, { advertiser_ids: advertiserIds });
@@ -253,6 +722,16 @@ router.get('/tiktok/callback', async (req, res) => {
     res.redirect(FRONTEND_URL + '/dashboard.html?oauth_success=tiktok');
   } catch(e) {
     console.error('[OAUTH TT]', e.message);
+    try {
+      const st = state ? decodeState(state) : null;
+      if (st?.mode === 'desktop') {
+        await query(
+          `UPDATE desktop_oauth_sessions SET status='error', error_message='Ошибка обмена OAuth-кода'
+           WHERE oauth_state=$1 AND status='pending'`, [st.oauthState]
+        );
+        return res.status(500).send(desktopResultPage(false, 'Ошибка обмена данными с TikTok.', 'TikTok'));
+      }
+    } catch (_) {}
     res.redirect(FRONTEND_URL + '/dashboard.html?oauth_error=tiktok');
   }
 });

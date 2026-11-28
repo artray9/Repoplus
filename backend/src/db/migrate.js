@@ -183,6 +183,23 @@ async function migrate() {
       updated_at    TIMESTAMP DEFAULT NOW(),
       UNIQUE(user_id, source)
     )`);
+    await client.query(`CREATE TABLE IF NOT EXISTS desktop_oauth_sessions (
+      id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      source               TEXT NOT NULL,
+      poll_token_hash      TEXT NOT NULL,
+      authorize_token_hash TEXT,
+      oauth_state          TEXT UNIQUE NOT NULL,
+      status               TEXT NOT NULL DEFAULT 'pending',
+      access_token         TEXT,
+      refresh_token        TEXT,
+      token_expires_at     TIMESTAMP,
+      error_message        TEXT,
+      expires_at           TIMESTAMP NOT NULL,
+      consumed_at          TIMESTAMP,
+      created_at           TIMESTAMP DEFAULT NOW()
+    )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_desktop_oauth_expiry ON desktop_oauth_sessions(expires_at)`);
+    await client.query(`ALTER TABLE desktop_oauth_sessions ADD COLUMN IF NOT EXISTS refresh_token TEXT`);
     await client.query(`ALTER TABLE account_balances ADD COLUMN IF NOT EXISTS extra JSONB DEFAULT '{}'`);
     await client.query(`ALTER TABLE account_balances ADD COLUMN IF NOT EXISTS amount_spent NUMERIC DEFAULT 0`);
     await client.query(`ALTER TABLE account_balances ADD COLUMN IF NOT EXISTS next_bill_date TIMESTAMP`);
